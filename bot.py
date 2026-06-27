@@ -37,20 +37,20 @@ WALLETS = {
 }
 
 # You allowed changing products/categories — choose any sensible ones.
-CATEGORIES = ["🔫Tazers", "🔪Shanks", "🥤Lean"]
+CATEGORIES = ["🧑🏻‍💻Spammed"]
 
 PRODUCTS = {
-    "handheld": {"name": "Normal hand held taser", "£": 50, "cat": "🔫Tazers", "stock": 50},
-    "stungun": {"name": "Police stun gun taser", "£": 250, "cat": "🔫Tazers", "stock": 50},
-    "szombie": {"name": "Straight zombie🧟‍♀️|ZK", "£": 80, "cat": "🔪Shanks", "stock": 50},
-    "ozombie": {"name": "Original zombie🧟‍♀️|ZK", "£": 80, "cat": "🔪Shanks", "stock": 50},
-    "rambo": {"name": "17 inch Rambo", "£": 50, "cat": "🔪Shanks", "stock": 50},
-    "bstilleto": {"name": "Big stilleto", "£": 35, "cat": "🔪Shanks", "stock": 50},
-    "nstilleto": {"name": "Normal stilleto", "£": 25, "cat": "🔪Shanks", "stock": 50},
-    "tosnopro": {"name": "🥤🙅‍♂️Toseina Fullset No Prometh", "£": 80, "cat": "🥤Lean", "stock": 50},
-    "toswiithpro": {"name": "🥤✅Toseina Fullset With Prometh", "£": 100, "cat": "🥤Lean", "stock": 50},
-    "wockhardt": {"name": "Wockhardt 473ML", "£": 160, "cat": "🥤Lean", "stock": 50},
-    "tris": {"name": "Tris Pharma 473ML", "£": 160, "cat": "🥤Lean", "stock": 50},
+    "handheld": {"name": "492918", "£": 25, "cat": "🧑🏻‍💻Spammed", "stock": 50},
+    "stungun": {"name": "492918", "£": 25, "cat": "🧑🏻‍💻Spammed", "stock": 50},
+    "szombie": {"name": "492918", "£": 25, "cat": "🧑🏻‍💻Spammed", "stock": 50},
+    "ozombie": {"name": "492918", "£": 25, "cat": "🧑🏻‍💻Spammed", "stock": 50},
+    "rambo": {"name": "492918", "£": 25, "cat": "🧑🏻‍💻Spammed", "stock": 50},
+    "bstilleto": {"name": "492918", "£": 25, "cat": "🧑🏻‍💻Spammed", "stock": 50},
+    "nstilleto": {"name": "492918", "£": 25, "cat": "🧑🏻‍💻Spammed", "stock": 50},
+    "tosnopro": {"name": "492918", "£": 25, "cat": "🧑🏻‍💻Spammed", "stock": 50},
+    "toswiithpro": {"name": "492918", "£": 25, "cat": "🧑🏻‍💻Spammed", "stock": 50},
+    "wockhardt": {"name": "492918", "£": 25, "cat": "🧑🏻‍💻Spammed", "stock": 50},
+    "tris": {"name": "492918", "£": 25, "cat": "🧑🏻‍💻Spammed", "stock": 50},
 }
 
 # PGP key placeholder — paste your key here later (triple single-quotes to avoid nested triple-quote issues)
@@ -179,16 +179,13 @@ async def check_ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main_menu_text():
     return (
-        "🎉WELCOME TO GALORE STORE🎉\n\n"
-        "Last seen: a few days ago\n"
+        "🎉WELCOME TO PABLOCC STORE🎉\n\n"
+        "Last seen: a few hours ago\n"
         "Currency: GBP\n"
-        "Current Sales: 35,466\n"
-        "Rating: 🌟4.83/5 (9,770)\n\n"                     # Star behind the 4
-        "• Ships from UK → UK Stealth📦\n"           # Package at the end
-        "• £25+ minimum (send extra for fees or payment will be lost no refund)🙅‍♂️\n\n"
-        "FOR CUSTOM DEALS PM @c0mpromised\n\n"
-        "Join for visuals - https://t.me/+KIGCLphnmqUwNDM0\n\n"
-        "Now buy all your meds at a reasonable price\n\n"
+        "• Send extra for fees or payment will be lost no refund🙅‍♂️\n\n"
+        "Pm for any spoofing/spamming/coding enquiries @pabloscc\n\n"
+        "Join for updates - https://t.me/+Gz44fjZeiudmYTJk\n\n"
+        "24/7 Support and fast response times\n\n"
         "⬇️Select an option below:"
     )
 
