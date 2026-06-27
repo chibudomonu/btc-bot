@@ -20,7 +20,7 @@ from telegram.ext import (
 )
 
 # ====================== CONFIG ======================
-TELEGRAM_TOKEN = "8333631243:AAG0CLhz1rJS4PRbxLcSqHDrK5HPFBx-g1g"
+TELEGRAM_TOKEN = "8775358499:AAGgmIyh3qiX2VIHhtb5JkJjtFiXvh51T4A"
 ADMIN_ID = 1942502806  # set your admin telegram id here
 MIN_GBP = 0
 
