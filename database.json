@@ -1,0 +1,20 @@
+{
+  "banned_users": [],
+  "products_stock": {
+    "handheld": 50,
+    "stungun": 50,
+    "szombie": 50,
+    "ozombie": 50,
+    "rambo": 50,
+    "bstilleto": 50,
+    "nstilleto": 50,
+    "tosnopro": 50,
+    "toswiithpro": 50,
+    "wockhardt": 50,
+    "tris": 50
+  },
+  "pending_orders": {},
+  "confirmed_orders": {},
+  "users": {},
+  "messages": {}
+}
