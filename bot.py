@@ -37,20 +37,20 @@ WALLETS = {
 }
 
 # You allowed changing products/categories — choose any sensible ones.
-CATEGORIES = ["🧑🏻‍💻Spammed"]
+CATEGORIES = ["Barclays", "Lloyds", "Hsbc", "Santander", "Halifax", "Nationwide", "Bank of scotland", "Amex"]
 
 PRODUCTS = {
-    "handheld": {"name": "492918", "£": 25, "cat": "🧑🏻‍💻Spammed", "stock": 50},
-    "stungun": {"name": "492918", "£": 25, "cat": "🧑🏻‍💻Spammed", "stock": 50},
-    "szombie": {"name": "492918", "£": 25, "cat": "🧑🏻‍💻Spammed", "stock": 50},
-    "ozombie": {"name": "492918", "£": 25, "cat": "🧑🏻‍💻Spammed", "stock": 50},
-    "rambo": {"name": "492918", "£": 25, "cat": "🧑🏻‍💻Spammed", "stock": 50},
-    "bstilleto": {"name": "492918", "£": 25, "cat": "🧑🏻‍💻Spammed", "stock": 50},
-    "nstilleto": {"name": "492918", "£": 25, "cat": "🧑🏻‍💻Spammed", "stock": 50},
-    "tosnopro": {"name": "492918", "£": 25, "cat": "🧑🏻‍💻Spammed", "stock": 50},
-    "toswiithpro": {"name": "492918", "£": 25, "cat": "🧑🏻‍💻Spammed", "stock": 50},
-    "wockhardt": {"name": "492918", "£": 25, "cat": "🧑🏻‍💻Spammed", "stock": 50},
-    "tris": {"name": "492918", "£": 25, "cat": "🧑🏻‍💻Spammed", "stock": 50},
+    "handheld": {"name": "465923 - Platinum credit", "£": 25, "cat": "Barclays", "stock": 15},
+    "stungun": {"name": "492915 - Platinum credit", "£": 25, "cat": "Barclays", "stock": 7},
+    "szombie": {"name": "465861 - Business debit", "£": 25, "cat": "Barclays", "stock": 9},
+    "ozombie": {"name": "465860 - Business debit", "£": 25, "cat": "Barclays", "stock": 6},
+    "rambo": {"name": "465922 - Platinum debit", "£": 15, "cat": "Barclays", "stock": 2},
+    "bstilleto": {"name": "459630 - Business debit", "£": 10, "cat": "Barclays", "stock": 1},
+    "nstilleto": {"name": "465865 - Classic debit", "£": 10, "cat": "Barclays", "stock": 1},
+    "tosnopro": {"name": "492918-SE7 6QB-£25", "£": 25, "cat": "🧑🏻‍💻Spammed", "stock": 50},
+    "toswiithpro": {"name": "492918-SE7 6QB-£25", "£": 25, "cat": "🧑🏻‍💻Spammed", "stock": 50},
+    "wockhardt": {"name": "492918-SE7 6QB-£25", "£": 25, "cat": "🧑🏻‍💻Spammed", "stock": 50},
+    "tris": {"name": "492918-SE7 6QB-£25", "£": 25, "cat": "🧑🏻‍💻Spammed", "stock": 50},
 }
 
 # PGP key placeholder — paste your key here later (triple single-quotes to avoid nested triple-quote issues)
