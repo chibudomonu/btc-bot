@@ -66,14 +66,18 @@ stored_users: Dict[str, Any] = {}
 admin_messages: Dict[str, Dict[str, Any]] = {}
 reviews = []
 banned_users = set()
+# Optional per-unit stock. Use this when each sold item must deliver unique information.
+# Example: {"handheld": ["CODE-1", "CODE-2"]}
+product_items: Dict[str, list] = {}
 
 # ====================== PERSISTENCE HELPERS ======================
 def load_db():
-    global pending_orders, confirmed_orders, stored_users, admin_messages, reviews, banned_users, PRODUCTS
+    global pending_orders, confirmed_orders, stored_users, admin_messages, reviews, banned_users, PRODUCTS, product_items
     if not os.path.exists(DB_FILE):
         db = {
             "banned_users": [],
             "products_stock": {pid: PRODUCTS[pid]["stock"] for pid in PRODUCTS},
+            "product_items": {pid: [] for pid in PRODUCTS},
             "pending_orders": {},
             "confirmed_orders": {},
             "users": {},
@@ -104,6 +108,17 @@ def load_db():
             except Exception:
                 pass
 
+    # unique per-unit stock items, if used
+    product_items.clear()
+    for pid in PRODUCTS:
+        product_items[pid] = []
+    for pid, items in db.get("product_items", {}).items():
+        if pid in PRODUCTS and isinstance(items, list):
+            product_items[pid] = [str(x) for x in items]
+            # When unique items exist, stock follows the number of remaining entries.
+            if product_items[pid]:
+                PRODUCTS[pid]["stock"] = len(product_items[pid])
+
     # pending and confirmed orders
     pending_orders.clear()
     confirmed_orders.clear()
@@ -130,6 +145,7 @@ def save_db():
     db = {
         "banned_users": list(banned_users),
         "products_stock": {pid: PRODUCTS[pid]["stock"] for pid in PRODUCTS},
+        "product_items": product_items,
         "pending_orders": pending_orders,
         "confirmed_orders": confirmed_orders,
         "users": stored_users,
@@ -208,9 +224,52 @@ def coin_keyboard(prefix="pay"):
     return InlineKeyboardMarkup(kb)
 
 
+
+
+def nav_keyboard(back_callback=None, main=True, extra_rows=None):
+    rows = []
+    if extra_rows:
+        rows.extend(extra_rows)
+    nav = []
+    if back_callback:
+        nav.append(InlineKeyboardButton("⬅️ Back", callback_data=back_callback))
+    if main:
+        nav.append(InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu"))
+    if nav:
+        rows.append(nav)
+    return InlineKeyboardMarkup(rows)
+
+
+def pop_delivery_items(items):
+    delivered = {}
+    for pid, qty in items.items():
+        qty = int(qty)
+        if product_items.get(pid):
+            delivered[pid] = product_items[pid][:qty]
+            del product_items[pid][:qty]
+            PRODUCTS[pid]["stock"] = len(product_items[pid])
+        else:
+            delivered[pid] = []
+    return delivered
+
+
+def delivered_text(od):
+    delivered = od.get("delivered_items") or {}
+    lines = []
+    for pid, qty in od.get("items", {}).items():
+        name = PRODUCTS.get(pid, {}).get("name", pid)
+        details = delivered.get(pid, [])
+        if details:
+            for detail in details:
+                lines.append(f"• {name}: {detail}")
+        else:
+            lines.append(f"• {name} × {qty}")
+    return "\n".join(lines) if lines else "None"
+
 def can_fulfil(items):
     for pid, qty in items.items():
-        if PRODUCTS.get(pid, {}).get("stock", 0) < qty:
+        available = len(product_items.get(pid, [])) if product_items.get(pid) else PRODUCTS.get(pid, {}).get("stock", 0)
+        if available < int(qty):
             return False, PRODUCTS.get(pid, {}).get("name", pid)
     return True, None
 
@@ -233,7 +292,10 @@ def complete_purchase(od):
     buyer["transaction_history"].append({"ref": ref, "type": "purchase", "amount": -od["total_gbp"], "method": od.get("coin", "Balance"), "time": time.time()})
     buyer["total_spent"] = buyer.get("total_spent", 0) + od["total_gbp"]
     buyer["lifetime_orders"] = buyer.get("lifetime_orders", 0) + 1
-    deduct_stock(od["items"])
+    od["delivered_items"] = pop_delivery_items(od.get("items", {}))
+    # Normal stock deduction is still used for products without unique per-unit stock entries.
+    normal_items = {pid: qty for pid, qty in od.get("items", {}).items() if not od["delivered_items"].get(pid)}
+    deduct_stock(normal_items)
     if int(od["user_id"]) in user_data:
         user_data[int(od["user_id"])] ["orders"] = buyer["orders"]
         user_data[int(od["user_id"])] ["cart"] = {}
@@ -419,6 +481,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user["last_active"] = now
     await q.answer()
     data = q.data
+    # Keep the chat cleaner: delete the previous bot message when a different one is being used.
+    lm = user.get("last_bot_message")
+    if lm and lm.get("message_id") != q.message.message_id:
+        try:
+            await context.bot.delete_message(chat_id=lm["chat_id"], message_id=lm["message_id"])
+        except Exception:
+            pass
+    user["last_bot_message"] = {"chat_id": q.message.chat_id, "message_id": q.message.message_id}
 
     if data == "main_menu":
         await q.edit_message_text(main_menu_text(), reply_markup=main_menu_keyboard())
@@ -437,7 +507,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             p = PRODUCTS[pid]
             text += f"• {p['name']} — £{p['£']}\n"
             kb.append([InlineKeyboardButton(p["name"], callback_data=f"item_{pid}")])
-        kb.append([InlineKeyboardButton("Back", callback_data="show_categories"), InlineKeyboardButton("Main Menu", callback_data="main_menu")])
+        kb.append([InlineKeyboardButton("⬅️ Back", callback_data="show_categories"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")])
         await q.edit_message_text(text, reply_markup=InlineKeyboardMarkup(kb))
         return
 
@@ -556,7 +626,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb = [[InlineKeyboardButton("💰 Pay With Balance", callback_data="pay_balance")]]
         for c in WALLETS.keys():
             kb.append([InlineKeyboardButton(c, callback_data=f"pay_{c}")])
-        kb.append([InlineKeyboardButton("Back", callback_data="menu_cart")])
+        kb.append([InlineKeyboardButton("⬅️ Back", callback_data="menu_cart"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")])
         await q.edit_message_text(f"Choose payment method:\n\nPurchase total: £{total_gbp}\nCurrent balance: £{buyer.get('balance', 0)}", reply_markup=InlineKeyboardMarkup(kb))
         return
 
@@ -616,7 +686,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(ADMIN_ID, f"💳 Payment awaiting review\n\nUser: {q.from_user.full_name}\nTelegram ID: {uid}\nReference ID: {ref}\nCoin: {od['coin']}\nAmount: £{od['total_gbp']}\nProducts:\n{items_text(od['items'])}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Open Pending Payments", callback_data="admin_pending")]]))
         except Exception:
             pass
-        await q.edit_message_text("✅ Your payment has been submitted and your order will be delivered automatically after confirmation.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Main Menu", callback_data="main_menu")]]))
+        await q.edit_message_text("✅ Your payment has been submitted and your order will be delivered automatically after confirmation.", reply_markup=nav_keyboard("purchase_now", extra_rows=[[InlineKeyboardButton("🛍 Shop Now", callback_data="show_categories")]]))
         return
 
     if data == "admin_open":
@@ -632,14 +702,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.answer("Forbidden", show_alert=True)
             return
         if not pending_orders:
-            await q.edit_message_text("No pending orders.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="admin_open")]]))
+            await q.edit_message_text("No pending orders.", reply_markup=nav_keyboard("admin_open"))
             return
         text = "PENDING PAYMENTS:\n\n"
         kb = []
         for ref, od in pending_orders.items():
             text += f"• {ref} — £{od['total_gbp']} — {od['coin']} — User {od['user_id']} — {od.get('status','pending')}\n"
             kb.append([InlineKeyboardButton(f"View {ref}", callback_data=f"admin_view_pending_{ref}")])
-        kb.append([InlineKeyboardButton("Back", callback_data="admin_open")])
+        kb.append([InlineKeyboardButton("⬅️ Back", callback_data="admin_open"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")])
         await q.edit_message_text(text, reply_markup=InlineKeyboardMarkup(kb))
         return
 
@@ -650,7 +720,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ref = data[len("admin_view_pending_"):]
         od = pending_orders.get(ref)
         if not od:
-            await q.edit_message_text("Order not found.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="admin_pending")]]))
+            await q.edit_message_text("Order not found.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="admin_pending"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
             return
         products = od.get("items", {})
         order_type = od.get("type", "purchase")
@@ -674,7 +744,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ Approve", callback_data=f"admin_confirm_{ref}"), InlineKeyboardButton("❌ Reject", callback_data=f"admin_cancel_{ref}")],
             [InlineKeyboardButton("🗑 Delete", callback_data=f"admin_delete_pending_{ref}")],
-            [InlineKeyboardButton("Back", callback_data="admin_pending")]
+            [InlineKeyboardButton("⬅️ Back", callback_data="admin_pending"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]
         ])
         await q.edit_message_text(text, reply_markup=kb)
         return
@@ -690,7 +760,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         od["status"] = "deleted"
         save_db()
-        await q.edit_message_text(f"Pending payment {ref} deleted.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="admin_pending")]]))
+        await q.edit_message_text(f"Pending payment {ref} deleted.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="admin_pending"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
         return
 
     if data.startswith("admin_confirm_"):
@@ -718,7 +788,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             confirmed_orders[ref] = od
             save_db()
             try:
-                await context.bot.send_message(od["user_id"], f"✅ Deposit approved. £{od['total_gbp']} has been added to your balance.")
+                await context.bot.send_message(od["user_id"], f"✅ Deposit approved. £{od['total_gbp']} has been added to your balance.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛍 Shop Now", callback_data="show_categories")], [InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
             except Exception:
                 pass
         else:
@@ -727,7 +797,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_message(od["user_id"], f"✅ Payment approved. Your order has been delivered.\nReference ID: {ref}\n\nProducts:\n{items_text(od['items'])}")
             except Exception:
                 pass
-        await q.edit_message_text(f"Payment {ref} approved.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="admin_pending")]]))
+        await q.edit_message_text(f"Payment {ref} approved.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="admin_pending"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
         return
 
     if data.startswith("admin_cancel_"):
@@ -747,7 +817,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(od["user_id"], f"Your payment/order {ref} has been rejected.")
         except Exception:
             pass
-        await q.edit_message_text(f"Payment/order {ref} rejected.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="admin_pending")]]))
+        await q.edit_message_text(f"Payment/order {ref} rejected.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="admin_pending"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
         return
 
 
@@ -756,14 +826,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.answer("Forbidden", show_alert=True)
             return
         if not confirmed_orders:
-            await q.edit_message_text("No confirmed orders.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="admin_open")]]))
+            await q.edit_message_text("No confirmed orders.", reply_markup=nav_keyboard("admin_open"))
             return
         text = "CONFIRMED ORDERS:\n\n"
         kb = []
         for ref, od in confirmed_orders.items():
             text += f"• {ref} — £{od.get('total_gbp','?')} — User {od.get('user_id')}\n"
             kb.append([InlineKeyboardButton(f"View {ref}", callback_data=f"admin_view_confirmed_{ref}")])
-        kb.append([InlineKeyboardButton("Back", callback_data="admin_open")])
+        kb.append([InlineKeyboardButton("⬅️ Back", callback_data="admin_open"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")])
         await q.edit_message_text(text, reply_markup=InlineKeyboardMarkup(kb))
         return
 
@@ -773,7 +843,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ref = data[len("admin_view_confirmed_"):]
         od = confirmed_orders.get(ref)
         if not od:
-            await q.edit_message_text("Order not found.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="admin_confirmed")]]))
+            await q.edit_message_text("Order not found.", reply_markup=nav_keyboard("admin_confirmed"))
             return
         text = f"ORDER {ref}\nUser: {od.get('user_id')}\nTotal: £{od.get('total_gbp')} — {od.get('coin')}\nType: {od.get('type', 'purchase').title()}\nStatus: {od.get('status', 'confirmed')}\n\nITEMS:\n"
         products = od.get("items", {})
@@ -788,7 +858,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text += "\nSHIPPING:\n"
             for k, v in shipping.items():
                 text += f"{k}: {v}\n"
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton("🗑 Delete Order", callback_data=f"admin_delete_confirmed_{ref}")],[InlineKeyboardButton("Back", callback_data="admin_confirmed")]])
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("🗑 Delete Order", callback_data=f"admin_delete_confirmed_{ref}")],[InlineKeyboardButton("⬅️ Back", callback_data="admin_confirmed"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]])
         await q.edit_message_text(text, reply_markup=kb)
         return
     # -------- ADMIN: Delete Confirmed Order --------
@@ -839,7 +909,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for pid, p in PRODUCTS.items():
             text += f"{p['name']}: {p['stock']}\n"
             kb.append([InlineKeyboardButton(p["name"], callback_data=f"admin_stock_{pid}")])
-        kb.append([InlineKeyboardButton("Back", callback_data="admin_open")])
+        kb.append([InlineKeyboardButton("⬅️ Back", callback_data="admin_open"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")])
         await q.edit_message_text(text, reply_markup=InlineKeyboardMarkup(kb))
         return
 
@@ -850,7 +920,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pid = data[len("admin_stock_"):]
         user["awaiting_stock_change"] = pid
         p = PRODUCTS[pid]
-        await q.edit_message_text(f"Enter new stock amount for {p['name']} (current: {p['stock']}):", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="admin_stock")]]))
+        await q.edit_message_text(f"Enter new stock amount for {p['name']} (current: {p['stock']}):", reply_markup=nav_keyboard("admin_stock"))
         return
 
     if data == "admin_messages":
@@ -858,7 +928,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.answer("Forbidden", show_alert=True)
             return
         if not admin_messages:
-            await q.edit_message_text("No messages from users.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="admin_open")]]))
+            await q.edit_message_text("No messages from users.", reply_markup=nav_keyboard("admin_open"))
             return
         text = "MESSAGES FROM USERS:\n\n"
         kb = []
@@ -866,7 +936,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text += f"• From {mid} — {m.get('preview','')}\n"
             kb.append([InlineKeyboardButton("Open "+str(mid), callback_data=f"admin_message_{mid}")])
         kb.append([InlineKeyboardButton("Clear Messages", callback_data="admin_clear_messages")])
-        kb.append([InlineKeyboardButton("Back", callback_data="admin_open")])
+        kb.append([InlineKeyboardButton("⬅️ Back", callback_data="admin_open"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")])
         await q.edit_message_text(text, reply_markup=InlineKeyboardMarkup(kb))
         return
 
@@ -876,7 +946,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         admin_messages.clear()
         save_db()
-        await q.edit_message_text("All messages cleared.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="admin_messages")]]))
+        await q.edit_message_text("All messages cleared.", reply_markup=nav_keyboard("admin_messages"))
         return
 
     if data.startswith("admin_message_"):
@@ -886,10 +956,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         mid = data[len("admin_message_"):]
         msg = admin_messages.get(mid)
         if not msg:
-            await q.edit_message_text("Message not found.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="admin_messages")]]))
+            await q.edit_message_text("Message not found.", reply_markup=nav_keyboard("admin_messages"))
             return
         text = f"Message from {mid} (time: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(msg.get('time',0)))}):\n\n{msg.get('full','')}"
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton("Reply", callback_data=f"admin_reply_{mid}")],[InlineKeyboardButton("Back", callback_data="admin_messages")]])
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("Reply", callback_data=f"admin_reply_{mid}")],[InlineKeyboardButton("⬅️ Back", callback_data="admin_messages"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]])
         await q.edit_message_text(text, reply_markup=kb)
         return
 
@@ -899,7 +969,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         mid = data[len("admin_reply_"):]
         user["awaiting_admin_reply"] = mid
-        await q.edit_message_text(f"Type your reply to user {mid} (send as a chat message):", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data=f"admin_message_{mid}")]]))
+        await q.edit_message_text(f"Type your reply to user {mid} (send as a chat message):", reply_markup=nav_keyboard(f"admin_message_{mid}"))
         return
 
     if data == "admin_ban":
@@ -908,7 +978,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.answer("Forbidden", show_alert=True)
             return
         context.user_data["awaiting_ban"] = True
-        await q.edit_message_text("Send numeric Telegram User ID to ban/unban (in chat):", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="admin_open")]]))
+        await q.edit_message_text("Send numeric Telegram User ID to ban/unban (in chat):", reply_markup=nav_keyboard("admin_open"))
         return
 
     if data == "menu_balance":
@@ -925,7 +995,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "deposit_custom":
         user["awaiting_deposit_amount"] = True
-        await q.edit_message_text("Type the amount you want to add to your balance in GBP.\n\nExample: 35", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="menu_balance")]]))
+        await q.edit_message_text("Type the amount you want to add to your balance in GBP.\n\nExample: 35", reply_markup=nav_keyboard("menu_balance"))
         return
 
     if data.startswith("deposit_"):
@@ -958,7 +1028,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "leave_review":
         user["awaiting_review"] = True
-        await q.edit_message_text("Type your review and send it in chat:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="menu_reviews")]]))
+        await q.edit_message_text("Type your review and send it in chat:", reply_markup=nav_keyboard("menu_reviews"))
         return
 
     if data == "menu_history":
@@ -984,7 +1054,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "contact_write":
         user["awaiting_contact"] = True
-        await q.edit_message_text("💬Write your message for the store owner:\n\n just type your message and send it directly in the chat.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="menu_contact")]]))
+        await q.edit_message_text("💬Write your message for the store owner:\n\n just type your message and send it directly in the chat.", reply_markup=nav_keyboard("menu_contact"))
         return
 
     if data == "menu_orders":
@@ -1095,13 +1165,13 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             amount = int(float(cleaned))
         except Exception:
-            await update.message.reply_text("❌ Invalid amount. Please type a number like 25.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Try Again", callback_data="deposit_custom"), InlineKeyboardButton("Back", callback_data="menu_balance")]]))
+            await update.message.reply_text("❌ Invalid amount. Please type a number like 25.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Try Again", callback_data="deposit_custom"), InlineKeyboardButton("⬅️ Back", callback_data="menu_balance"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
             return
         if amount <= 0:
-            await update.message.reply_text("❌ Amount must be above £0.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Try Again", callback_data="deposit_custom"), InlineKeyboardButton("Back", callback_data="menu_balance")]]))
+            await update.message.reply_text("❌ Amount must be above £0.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Try Again", callback_data="deposit_custom"), InlineKeyboardButton("⬅️ Back", callback_data="menu_balance"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
             return
         if amount > 10000:
-            await update.message.reply_text("❌ Amount is too high. Please enter £10,000 or less.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Try Again", callback_data="deposit_custom"), InlineKeyboardButton("Back", callback_data="menu_balance")]]))
+            await update.message.reply_text("❌ Amount is too high. Please enter £10,000 or less.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Try Again", callback_data="deposit_custom"), InlineKeyboardButton("⬅️ Back", callback_data="menu_balance"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
             return
         await update.message.reply_text(f"Choose crypto for £{amount} balance deposit:", reply_markup=coin_keyboard(prefix=f"deppay_{amount}"))
         return
@@ -1141,7 +1211,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(target, f"💬 Reply from store:\n\n{text}")
         except Exception:
             pass
-        await update.message.reply_text(f"Reply sent to user {mid}.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="admin_messages")]]))
+        await update.message.reply_text(f"Reply sent to user {mid}.", reply_markup=nav_keyboard("admin_messages"))
         return
 
     # default fallback

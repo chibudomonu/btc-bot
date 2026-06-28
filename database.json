@@ -17,5 +17,18 @@
   "confirmed_orders": {},
   "users": {},
   "messages": {},
-  "reviews": []
+  "reviews": [],
+  "product_items": {
+    "handheld": [],
+    "stungun": [],
+    "szombie": [],
+    "ozombie": [],
+    "rambo": [],
+    "bstilleto": [],
+    "nstilleto": [],
+    "tosnopro": [],
+    "toswiithpro": [],
+    "wockhardt": [],
+    "tris": []
+  }
 }
