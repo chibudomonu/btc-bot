@@ -16,5 +16,6 @@
   "pending_orders": {},
   "confirmed_orders": {},
   "users": {},
-  "messages": {}
+  "messages": {},
+  "reviews": []
 }
