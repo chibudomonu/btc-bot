@@ -178,9 +178,11 @@ def get_user(uid: int):
             "awaiting_review": False,
             "awaiting_deposit_amount": False,
         }
-    # sync confirmed orders into the user's view
-    s = stored_users.get(str(uid), {})
+    # Sync permanent account data back into the active session.
+    s = ensure_stored_user(uid)
     user_data[uid]["orders"] = s.get("orders", [])
+    if s.get("secret_phrase") and not user_data[uid].get("secret_phrase"):
+        user_data[uid]["secret_phrase"] = s.get("secret_phrase")
     return user_data[uid]
 
 
@@ -189,7 +191,9 @@ def ensure_stored_user(uid: int):
     uid_str = str(uid)
     stored_users.setdefault(uid_str, {})
     u = stored_users[uid_str]
+    # Permanent account fields. These stay in database.json and survive sessions/restarts.
     u.setdefault("orders", [])
+    u.setdefault("pending_orders", [])
     u.setdefault("purchase_history", [])
     u.setdefault("deposit_history", [])
     u.setdefault("transaction_history", [])
@@ -197,7 +201,32 @@ def ensure_stored_user(uid: int):
     u.setdefault("total_deposited", 0)
     u.setdefault("total_spent", 0)
     u.setdefault("lifetime_orders", 0)
+    u.setdefault("secret_phrase", None)
     return u
+
+
+def remember_pending_for_user(uid: int, ref: str):
+    buyer = ensure_stored_user(uid)
+    if ref not in buyer["pending_orders"]:
+        buyer["pending_orders"].append(ref)
+
+
+def remove_pending_for_user(uid: int, ref: str):
+    buyer = ensure_stored_user(uid)
+    if ref in buyer.get("pending_orders", []):
+        buyer["pending_orders"].remove(ref)
+
+
+def nav_rows(back_callback=None, main=True):
+    rows = []
+    nav = []
+    if back_callback:
+        nav.append(InlineKeyboardButton("⬅️ Back", callback_data=back_callback))
+    if main:
+        nav.append(InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu"))
+    if nav:
+        rows.append(nav)
+    return rows
 
 
 def cart_total(cart):
@@ -286,6 +315,7 @@ def complete_purchase(od):
     od["status"] = "confirmed"
     od["confirmed"] = time.time()
     confirmed_orders[ref] = od
+    remove_pending_for_user(int(od["user_id"]), ref)
     if ref not in buyer["orders"]:
         buyer["orders"].append(ref)
     buyer["purchase_history"].append({"ref": ref, "amount": od["total_gbp"], "items": od["items"], "time": time.time(), "method": od.get("coin", "Balance")})
@@ -403,7 +433,7 @@ async def show_item_page(q, pid):
 async def show_wishlist(q):
     user = get_user(q.from_user.id)
     if not user["wishlist"]:
-        await q.edit_message_text("Your wishlist is empty.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Shop Now", callback_data="show_categories")], [InlineKeyboardButton("Main Menu", callback_data="main_menu")]]))
+        await q.edit_message_text("Your wishlist is empty.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Shop Now", callback_data="show_categories")], [InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
         return
     text = "YOUR WISHLIST\n\n"
     kb = []
@@ -420,17 +450,20 @@ async def show_wishlist(q):
 async def show_user_orders(q):
     uid = q.from_user.id
     user = get_user(uid)
-    orders = user.get("orders", [])
-    if not orders:
-        await q.edit_message_text("You have no orders.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Main Menu", callback_data="main_menu")]]))
+    stored = ensure_stored_user(uid)
+    orders = list(stored.get("orders", []))
+    pending_refs = [r for r in stored.get("pending_orders", []) if r in pending_orders]
+    all_refs = pending_refs + [r for r in orders if r not in pending_refs]
+    if not all_refs:
+        await q.edit_message_text("You have no orders.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛍 Shop Now", callback_data="show_categories")], [InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
         return
-    text = "YOUR ORDERS (confirmed):\n\n"
+    text = "YOUR ORDERS:\n\n"
     kb = []
-    for ref in orders:
-        od = confirmed_orders.get(ref) or pending_orders.get(ref) or {}
-        text += f"• {ref} — £{od.get('total_gbp','?')} — {od.get('coin','')}\n"
+    for ref in all_refs:
+        od = pending_orders.get(ref) or confirmed_orders.get(ref) or {}
+        text += f"• {ref} — £{od.get('total_gbp','?')} — {od.get('coin','')} — {od.get('status','confirmed')}\n"
         kb.append([InlineKeyboardButton(f"View {ref}", callback_data=f"order_view_{ref}")])
-    kb.append([InlineKeyboardButton("Main Menu", callback_data="main_menu")])
+    kb.append([InlineKeyboardButton("⬅️ Back", callback_data="main_menu"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")])
     await q.edit_message_text(text, reply_markup=InlineKeyboardMarkup(kb))
 
 
@@ -440,19 +473,22 @@ async def view_order_for_user(q, ref):
     if str(uid) not in stored_users:
         user_orders = []
     else:
-        user_orders = stored_users[str(uid)].get("orders", [])
+        su = ensure_stored_user(uid)
+        user_orders = su.get("orders", []) + su.get("pending_orders", [])
     if ref not in user_orders:
         await q.answer("You don't have permission to view this order.", show_alert=True)
         return
-    od = confirmed_orders.get(ref) or pending_orders.get(ref)
+    od = pending_orders.get(ref) or confirmed_orders.get(ref)
     if not od:
-        await q.edit_message_text("Order not found.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Main Menu", callback_data="main_menu")]]))
+        await q.edit_message_text("Order not found.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
         return
     text = f"ORDER {ref}\nTotal: £{od.get('total_gbp')}\nCoin: {od.get('coin')}\nItems:\n"
     for pid, qty in od.get("items", {}).items():
         text += f"• {PRODUCTS.get(pid, {}).get('name', pid)} × {qty}\n"
     text += f"\nStatus: {od.get('status','pending')}\n"
-    await q.edit_message_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Main Menu", callback_data="main_menu")]]))
+    if od.get("delivered_items"):
+        text += f"\nDelivered details:\n{delivered_text(od)}\n"
+    await q.edit_message_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="menu_orders"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
 
 
 # BUTTON HANDLER
@@ -603,7 +639,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "menu_cart":
         cart = user["cart"]
         if not cart:
-            await q.edit_message_text("Your cart is empty.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Shop Now", callback_data="show_categories")],[InlineKeyboardButton("Main Menu", callback_data="main_menu")]]))
+            await q.edit_message_text("Your cart is empty.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Shop Now", callback_data="show_categories")],[InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
             return
         total = sum(PRODUCTS[k]["£"] * v for k, v in cart.items())
         txt = "YOUR CART:\n\n" + "\n".join(f"• {PRODUCTS[k]['name']} × {v} = £{PRODUCTS[k]['£'] * v}" for k, v in cart.items())
@@ -614,12 +650,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "empty_cart":
         user["cart"].clear()
-        await q.edit_message_text("Cart cleared.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Main Menu", callback_data="main_menu")]]))
+        await q.edit_message_text("Cart cleared.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
         return
 
     if data == "purchase_now":
         if not user["cart"]:
-            await q.edit_message_text("Your cart is empty.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Main Menu", callback_data="main_menu")]]))
+            await q.edit_message_text("Your cart is empty.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
             return
         total_gbp = cart_total(user["cart"])
         buyer = ensure_stored_user(uid)
@@ -645,7 +681,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         od = {"user_id": uid, "username": q.from_user.username, "ref": ref, "total_gbp": total_gbp, "coin": "Balance", "items": user["cart"].copy(), "created": time.time(), "status": "confirmed"}
         user["cart"].clear()
         complete_purchase(od)
-        await q.edit_message_text(f"✅ Purchase complete.\nReference ID: {ref}\n\nProducts delivered:\n{items_text(od['items'])}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Main Menu", callback_data="main_menu")]]))
+        await q.edit_message_text(f"✅ Purchase complete.\nReference ID: {ref}\n\nProducts delivered:\n{delivered_text(od)}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛍 Shop Now", callback_data="show_categories")], [InlineKeyboardButton("📦 My Orders", callback_data="menu_orders")], [InlineKeyboardButton("⬅️ Back", callback_data="menu_cart"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
         return
 
     if data.startswith("pay_"):
@@ -660,6 +696,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         ref = make_ref(uid)
         pending_orders[ref] = {"user_id": uid, "username": q.from_user.username, "ref": ref, "total_gbp": total_gbp, "coin": coin, "items": user["cart"].copy(), "created": time.time(), "status": "awaiting_user_paid", "type": "purchase"}
+        remember_pending_for_user(uid, ref)
         save_db()
         msg = (f"ORDER #{ref}\n\n"
                f"Wallet address:\n{addr}\n\n"
@@ -671,7 +708,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                "• Sending another cryptocurrency or sending to the wrong address may permanently lose your funds.\n\n"
                "• Your order will only be processed after payment has been confirmed.\n\n"
                "After you’ve sent the payment, press “I’ve Paid”.")
-        await q.edit_message_text(msg, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("I’ve Paid", callback_data=f"paid_{ref}")],[InlineKeyboardButton("Main Menu", callback_data="main_menu")]]))
+        await q.edit_message_text(msg, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("I’ve Paid", callback_data=f"paid_{ref}")], [InlineKeyboardButton("⬅️ Back", callback_data="purchase_now"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
         return
 
     if data.startswith("paid_"):
@@ -686,7 +723,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(ADMIN_ID, f"💳 Payment awaiting review\n\nUser: {q.from_user.full_name}\nTelegram ID: {uid}\nReference ID: {ref}\nCoin: {od['coin']}\nAmount: £{od['total_gbp']}\nProducts:\n{items_text(od['items'])}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Open Pending Payments", callback_data="admin_pending")]]))
         except Exception:
             pass
-        await q.edit_message_text("✅ Your payment has been submitted and your order will be delivered automatically after confirmation.", reply_markup=nav_keyboard("purchase_now", extra_rows=[[InlineKeyboardButton("🛍 Shop Now", callback_data="show_categories")]]))
+        back_to = "menu_balance" if od.get("type") == "deposit" else "purchase_now"
+        await q.edit_message_text("✅ Your payment has been submitted and your order will be delivered automatically after confirmation.", reply_markup=nav_keyboard(back_to, extra_rows=[[InlineKeyboardButton("🛍 Shop Now", callback_data="show_categories")]]))
         return
 
     if data == "admin_open":
@@ -759,6 +797,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.answer("Payment not found.", show_alert=True)
             return
         od["status"] = "deleted"
+        remove_pending_for_user(int(od["user_id"]), ref)
         save_db()
         await q.edit_message_text(f"Pending payment {ref} deleted.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="admin_pending"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
         return
@@ -780,6 +819,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         if od.get("type") == "deposit":
             buyer = ensure_stored_user(int(od["user_id"]))
+            remove_pending_for_user(int(od["user_id"]), ref)
             buyer["balance"] = buyer.get("balance", 0) + od["total_gbp"]
             buyer["total_deposited"] = buyer.get("total_deposited", 0) + od["total_gbp"]
             buyer["deposit_history"].append({"ref": ref, "amount": od["total_gbp"], "coin": od["coin"], "time": time.time()})
@@ -788,13 +828,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             confirmed_orders[ref] = od
             save_db()
             try:
-                await context.bot.send_message(od["user_id"], f"✅ Deposit approved. £{od['total_gbp']} has been added to your balance.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛍 Shop Now", callback_data="show_categories")], [InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
+                await context.bot.send_message(od["user_id"], f"✅ Deposit approved. £{od['total_gbp']} has been added to your balance.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛍 Shop Now", callback_data="show_categories")], [InlineKeyboardButton("💰 Balance", callback_data="menu_balance")], [InlineKeyboardButton("⬅️ Back", callback_data="menu_history"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
             except Exception:
                 pass
         else:
             complete_purchase(od)
             try:
-                await context.bot.send_message(od["user_id"], f"✅ Payment approved. Your order has been delivered.\nReference ID: {ref}\n\nProducts:\n{items_text(od['items'])}")
+                await context.bot.send_message(od["user_id"], f"✅ Payment approved. Your order has been delivered.\nReference ID: {ref}\n\nProducts:\n{delivered_text(od)}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛍 Shop Now", callback_data="show_categories")], [InlineKeyboardButton("📦 My Orders", callback_data="menu_orders")], [InlineKeyboardButton("⬅️ Back", callback_data=f"order_view_{ref}"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
             except Exception:
                 pass
         await q.edit_message_text(f"Payment {ref} approved.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="admin_pending"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
@@ -810,11 +850,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.answer("Order not found.", show_alert=True)
             return
         od["status"] = "canceled"
+        remove_pending_for_user(int(od["user_id"]), ref)
         # record canceled in confirmed_orders for history
         confirmed_orders[ref] = od
         save_db()
         try:
-            await context.bot.send_message(od["user_id"], f"Your payment/order {ref} has been rejected.")
+            await context.bot.send_message(od["user_id"], f"Your payment/order {ref} has been rejected.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="menu_history"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
         except Exception:
             pass
         await q.edit_message_text(f"Payment/order {ref} rejected.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="admin_pending"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
@@ -1010,9 +1051,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         addr = WALLETS.get(coin)
         ref = make_ref(uid)
         pending_orders[ref] = {"user_id": uid, "username": q.from_user.username, "ref": ref, "total_gbp": amount, "coin": coin, "items": {}, "created": time.time(), "status": "awaiting_user_paid", "type": "deposit"}
+        remember_pending_for_user(uid, ref)
         save_db()
         msg = (f"DEPOSIT #{ref}\n\nWallet address:\n{addr}\n\nReference ID: {ref}\nPurchase total: £{amount}\nPayment method: {coin}\n\nIMPORTANT\n\n• Only send the selected cryptocurrency to the displayed address.\n\n• Sending another cryptocurrency or sending to the wrong address may permanently lose your funds.\n\n• Your balance will only be updated after payment has been confirmed.\n\nAfter you’ve sent the payment, press “I’ve Paid”.")
-        await q.edit_message_text(msg, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("I’ve Paid", callback_data=f"paid_{ref}")],[InlineKeyboardButton("Main Menu", callback_data="main_menu")]]))
+        await q.edit_message_text(msg, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("I’ve Paid", callback_data=f"paid_{ref}")], [InlineKeyboardButton("⬅️ Back", callback_data="menu_balance"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
         return
 
     if data == "menu_reviews":
@@ -1039,7 +1081,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += "\n".join(f"• {x['ref']} — £{x['amount']} — {x.get('coin','')}" for x in buyer.get("deposit_history", [])[-10:]) or "None"
         text += "\n\nTransaction History:\n"
         text += "\n".join(f"• {x['ref']} — {x['type']} — £{x['amount']}" for x in buyer.get("transaction_history", [])[-10:]) or "None"
-        await q.edit_message_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Main Menu", callback_data="main_menu")]]))
+        await q.edit_message_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
         return
 
     if data == "pgp_key":
@@ -1084,6 +1126,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("Secret phrase must be 4–60 characters. Try again.")
                 return
             user["secret_phrase"] = text
+            ensure_stored_user(uid)["secret_phrase"] = text
             user["awaiting_phrase"] = False
             user["last_active"] = time.time()
             save_db()
@@ -1181,7 +1224,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user["awaiting_review"] = False
         reviews.append({"user_id": uid, "name": update.effective_user.first_name or "User", "text": text[:500], "time": time.time()})
         save_db()
-        await update.message.reply_text("✅ Review saved.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("View Reviews", callback_data="menu_reviews")],[InlineKeyboardButton("Main Menu", callback_data="main_menu")]]))
+        await update.message.reply_text("✅ Review saved.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("View Reviews", callback_data="menu_reviews")],[InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
         return
 
     # contact message handling
@@ -1223,6 +1266,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await check_ban(update, context):
         return
     user = get_user(update.effective_user.id)
+    ensure_stored_user(update.effective_user.id)
     if user["secret_phrase"] is None:
         user["awaiting_phrase"] = True
         await update.message.reply_text("👋Welcome to GALORE BOT! This appears to be your first time here\n\n 🔑Please set a phrase-key (between 4–60 characters) that will be used for authentication when you're inactive for more than 10 minutes:")
