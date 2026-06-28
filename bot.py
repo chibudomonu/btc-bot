@@ -160,6 +160,7 @@ def get_user(uid: int):
             "awaiting_admin_reply": None,
             "awaiting_stock_change": None,
             "awaiting_review": False,
+            "awaiting_deposit_amount": False,
         }
     # sync confirmed orders into the user's view
     s = stored_users.get(str(uid), {})
@@ -651,15 +652,45 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not od:
             await q.edit_message_text("Order not found.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="admin_pending")]]))
             return
-        text = f"ORDER {ref}\nUser: {od['user_id']}\nTotal: £{od['total_gbp']} — {od['coin']}\n\nITEMS:\n"
-        for pid, qty in od["items"].items():
-            name = PRODUCTS.get(pid, {}).get("name", pid)
-            text += f"• {name} × {qty}\n"
-        text += "\nSHIPPING:\n"
-        for k, v in od["shipping"].items():
-            text += f"{k}: {v}\n"
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton("✔ Confirm", callback_data=f"admin_confirm_{ref}")],[InlineKeyboardButton("✖ Cancel", callback_data=f"admin_cancel_{ref}")],[InlineKeyboardButton("Back", callback_data="admin_pending")]])
+        products = od.get("items", {})
+        order_type = od.get("type", "purchase")
+        text = (
+            f"PAYMENT {ref}\n"
+            f"User: @{od.get('username') or 'No username'}\n"
+            f"Telegram ID: {od.get('user_id')}\n"
+            f"Reference ID: {ref}\n"
+            f"Coin: {od.get('coin')}\n"
+            f"Amount: £{od.get('total_gbp')}\n"
+            f"Type: {order_type.title()}\n"
+            f"Status: {od.get('status', 'pending')}\n\n"
+            "PRODUCTS:\n"
+        )
+        if products:
+            for pid, qty in products.items():
+                name = PRODUCTS.get(pid, {}).get("name", pid)
+                text += f"• {name} × {qty}\n"
+        else:
+            text += "• Balance deposit only\n"
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Approve", callback_data=f"admin_confirm_{ref}"), InlineKeyboardButton("❌ Reject", callback_data=f"admin_cancel_{ref}")],
+            [InlineKeyboardButton("🗑 Delete", callback_data=f"admin_delete_pending_{ref}")],
+            [InlineKeyboardButton("Back", callback_data="admin_pending")]
+        ])
         await q.edit_message_text(text, reply_markup=kb)
+        return
+
+    if data.startswith("admin_delete_pending_"):
+        if uid != ADMIN_ID:
+            await q.answer("Forbidden", show_alert=True)
+            return
+        ref = data[len("admin_delete_pending_"):]
+        od = pending_orders.pop(ref, None)
+        if not od:
+            await q.answer("Payment not found.", show_alert=True)
+            return
+        od["status"] = "deleted"
+        save_db()
+        await q.edit_message_text(f"Pending payment {ref} deleted.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="admin_pending")]]))
         return
 
     if data.startswith("admin_confirm_"):
@@ -744,13 +775,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not od:
             await q.edit_message_text("Order not found.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="admin_confirmed")]]))
             return
-        text = f"ORDER {ref}\nUser: {od['user_id']}\nTotal: £{od['total_gbp']} — {od['coin']}\n\nITEMS:\n"
-        for pid, qty in od["items"].items():
-            name = PRODUCTS.get(pid, {}).get("name", pid)
-            text += f"• {name} × {qty}\n"
-        text += "\nSHIPPING:\n"
-        for k, v in od["shipping"].items():
-            text += f"{k}: {v}\n"
+        text = f"ORDER {ref}\nUser: {od.get('user_id')}\nTotal: £{od.get('total_gbp')} — {od.get('coin')}\nType: {od.get('type', 'purchase').title()}\nStatus: {od.get('status', 'confirmed')}\n\nITEMS:\n"
+        products = od.get("items", {})
+        if products:
+            for pid, qty in products.items():
+                name = PRODUCTS.get(pid, {}).get("name", pid)
+                text += f"• {name} × {qty}\n"
+        else:
+            text += "• Balance deposit only\n"
+        shipping = od.get("shipping") or {}
+        if shipping:
+            text += "\nSHIPPING:\n"
+            for k, v in shipping.items():
+                text += f"{k}: {v}\n"
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("🗑 Delete Order", callback_data=f"admin_delete_confirmed_{ref}")],[InlineKeyboardButton("Back", callback_data="admin_confirmed")]])
         await q.edit_message_text(text, reply_markup=kb)
         return
@@ -877,8 +914,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "menu_balance":
         buyer = ensure_stored_user(uid)
         text = (f"💰 BALANCE\n\nCurrent Balance: £{buyer.get('balance', 0)}\nTotal Deposited: £{buyer.get('total_deposited', 0)}\nTotal Spent: £{buyer.get('total_spent', 0)}\nLifetime Orders: {buyer.get('lifetime_orders', 0)}")
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton("Add £10", callback_data="deposit_10"), InlineKeyboardButton("Add £25", callback_data="deposit_25")],[InlineKeyboardButton("Add £50", callback_data="deposit_50"), InlineKeyboardButton("Add £100", callback_data="deposit_100")],[InlineKeyboardButton("Main Menu", callback_data="main_menu")]])
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("Add £10", callback_data="deposit_10"), InlineKeyboardButton("Add £25", callback_data="deposit_25")],
+            [InlineKeyboardButton("Add £50", callback_data="deposit_50"), InlineKeyboardButton("Add £100", callback_data="deposit_100")],
+            [InlineKeyboardButton("✏️ Custom Amount", callback_data="deposit_custom")],
+            [InlineKeyboardButton("Main Menu", callback_data="main_menu")]
+        ])
         await q.edit_message_text(text, reply_markup=kb)
+        return
+
+    if data == "deposit_custom":
+        user["awaiting_deposit_amount"] = True
+        await q.edit_message_text("Type the amount you want to add to your balance in GBP.\n\nExample: 35", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="menu_balance")]]))
         return
 
     if data.startswith("deposit_"):
@@ -1039,6 +1086,24 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text_out, kb = build_item_page_text_and_kb(pid, user)
             sent = await update.message.reply_text(text_out, reply_markup=kb)
             user["last_bot_message"] = {"chat_id": sent.chat.id, "message_id": sent.message_id}
+        return
+
+    # custom balance deposit amount
+    if user.get("awaiting_deposit_amount"):
+        user["awaiting_deposit_amount"] = False
+        cleaned = text.replace("£", "").strip()
+        try:
+            amount = int(float(cleaned))
+        except Exception:
+            await update.message.reply_text("❌ Invalid amount. Please type a number like 25.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Try Again", callback_data="deposit_custom"), InlineKeyboardButton("Back", callback_data="menu_balance")]]))
+            return
+        if amount <= 0:
+            await update.message.reply_text("❌ Amount must be above £0.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Try Again", callback_data="deposit_custom"), InlineKeyboardButton("Back", callback_data="menu_balance")]]))
+            return
+        if amount > 10000:
+            await update.message.reply_text("❌ Amount is too high. Please enter £10,000 or less.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Try Again", callback_data="deposit_custom"), InlineKeyboardButton("Back", callback_data="menu_balance")]]))
+            return
+        await update.message.reply_text(f"Choose crypto for £{amount} balance deposit:", reply_markup=coin_keyboard(prefix=f"deppay_{amount}"))
         return
 
     # review handling
