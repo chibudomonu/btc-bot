@@ -155,12 +155,6 @@ def get_user(uid: int):
             "awaiting_contact": False,
             "awaiting_admin_reply": None,
             "awaiting_stock_change": None,
-            # NEW: Balance system
-            "balance": 0.0,
-            "total_deposited": 0.0,
-            "total_spent": 0.0,
-            "deposit_history": [],
-            "purchase_history": [],
         }
     # sync confirmed orders into the user's view
     s = stored_users.get(str(uid), {})
@@ -465,8 +459,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         total = sum(PRODUCTS[k]["£"] * v for k, v in cart.items())
         txt = "YOUR CART:\n\n" + "\n".join(f"• {PRODUCTS[k]['name']} × {v} = £{PRODUCTS[k]['£'] * v}" for k, v in cart.items())
-        txt += f"\n\nTotal: £{total}\n\nChoose delivery:"
-        kb = [[InlineKeyboardButton("InPost Locker (Free)", callback_data="delivery_inpost")],[InlineKeyboardButton("Home Delivery", callback_data="delivery_home")],[InlineKeyboardButton("Empty Cart", callback_data="empty_cart")],[InlineKeyboardButton("Main Menu", callback_data="main_menu")]]
+        txt += f"\n\nTotal: £{total}\n\nReady to checkout?:"
+        kb = [[InlineKeyboardButton("Purchase now", callback_data="purchase_now")],[InlineKeyboardButton("Empty Cart", callback_data="empty_cart")],[InlineKeyboardButton("Main Menu", callback_data="main_menu")]]
         await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
         return
 
