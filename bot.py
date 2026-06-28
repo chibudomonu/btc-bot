@@ -459,8 +459,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         total = sum(PRODUCTS[k]["£"] * v for k, v in cart.items())
         txt = "YOUR CART:\n\n" + "\n".join(f"• {PRODUCTS[k]['name']} × {v} = £{PRODUCTS[k]['£'] * v}" for k, v in cart.items())
-        txt += f"\n\nTotal: £{total}\n\nChoose delivery:"
-        kb = [[InlineKeyboardButton("InPost Locker (Free)", callback_data="delivery_inpost")],[InlineKeyboardButton("Home Delivery", callback_data="delivery_home")],[InlineKeyboardButton("Empty Cart", callback_data="empty_cart")],[InlineKeyboardButton("Main Menu", callback_data="main_menu")]]
+        txt += f"\n\nTotal: £{total}\n\nReady to checkout?:"
+        kb = [[InlineKeyboardButton("Purchase now", callback_data="purchase_now")],[InlineKeyboardButton("Empty Cart", callback_data="empty_cart")],[InlineKeyboardButton("Main Menu", callback_data="main_menu")]]
         await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
         return
 
