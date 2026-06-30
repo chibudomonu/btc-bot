@@ -352,7 +352,7 @@ async def check_ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             if update.message:
                 await update.message.reply_text("You are banned from using this bot.")
- o           elif update.callback_query:
+                elif update.callback_query:
                 await update.callback_query.answer("You are banned from using this bot.", show_alert=True)
         except Exception:
             pass
@@ -1337,7 +1337,7 @@ def main():
     # callback + message handlers
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
-    print("PABLO DEPLOY TEST 1")
+    print("Bot running...")
     app.run_polling()
 
 
