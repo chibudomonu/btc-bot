@@ -1386,10 +1386,10 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ensure_stored_user(update.effective_user.id)
     if user["secret_phrase"] is None:
         user["awaiting_phrase"] = True
-        await update.message.reply_text("👋Welcome to GALORE BOT! This appears to be your first time here\n\n 🔑Please set a phrase-key (between 4–60 characters) that will be used for authentication when you're inactive for more than 10 minutes:")
+        await update.message.reply_text("👋Welcome to PabloCC Store!\n\n 🔑Please set a phrase-key (between 4–60 characters) that will be used for authentication when you're inactive for more than 30 minutes:")
         return
     now = time.time()
-    if user.get("secret_phrase") and (now - user.get("last_active", 0) > 600):
+    if user.get("secret_phrase") and (now - user.get("last_active", 0) > 1800):
         user["awaiting_phrase"] = True
         await update.message.reply_text("❌Please enter your 4–60 character phrase key:")
         return
