@@ -20,7 +20,7 @@ from telegram.ext import (
 )
 
 # ====================== CONFIG ======================
-TELEGRAM_TOKEN = "8775358499:AAEshY_6WpSXhr948B1dLDnuBMlC5zxmIkk"
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "8775358499:AAEshY_6WpSXhr948B1dLDnuBMlC5zxmIkk")
 ADMIN_ID = 1942502806  # set your admin telegram id here
 MIN_GBP = 0
 
@@ -203,6 +203,7 @@ def get_user(uid: int):
     user_data[uid]["wishlist"] = s.setdefault("wishlist", user_data[uid].get("wishlist", {}))
     if s.get("secret_phrase") and not user_data[uid].get("secret_phrase"):
         user_data[uid]["secret_phrase"] = s.get("secret_phrase")
+    sanitize_user_lists(uid)
     return user_data[uid]
 
 
@@ -227,6 +228,35 @@ def ensure_stored_user(uid: int):
     u.setdefault("last_authenticated", 0)
     return u
 
+
+
+def sanitize_user_lists(uid: int):
+    """Keep cart and wishlist tied to valid products with sensible quantities."""
+    user = user_data.get(uid)
+    su = ensure_stored_user(uid)
+    changed = False
+    for field in ("cart", "wishlist"):
+        src = su.setdefault(field, {})
+        clean = {}
+        for pid, qty in list(src.items()):
+            if pid not in PRODUCTS:
+                changed = True
+                continue
+            try:
+                q = int(qty)
+            except Exception:
+                changed = True
+                continue
+            if q <= 0:
+                changed = True
+                continue
+            clean[pid] = q
+            if q != qty:
+                changed = True
+        su[field] = clean
+        if user is not None:
+            user[field] = clean
+    return changed
 
 def mark_user_active(uid: int, save: bool = False):
     """Refresh the active session timer. Button presses count as activity."""
@@ -280,13 +310,13 @@ def nav_rows(back_callback=None, main=True):
 
 
 def cart_total(cart):
-    return sum(PRODUCTS[k]["£"] * v for k, v in cart.items() if k in PRODUCTS)
+    return sum(PRODUCTS[k]["£"] * int(v) for k, v in cart.items() if k in PRODUCTS)
 
 
 def items_text(items):
     if not items:
         return "None"
-    return "\n".join(f"• {PRODUCTS.get(pid, {}).get('name', pid)} × {qty}" for pid, qty in items.items())
+    return "\n".join(f"• {PRODUCTS.get(pid, {}).get('name', pid)} × {int(qty)}" for pid, qty in items.items())
 
 
 def status_label(status):
@@ -313,7 +343,50 @@ def make_ref(uid: int):
 
 
 def admin_panel_keyboard():
-    return InlineKeyboardMarkup([[InlineKeyboardButton(f"Pending Payments ({len(pending_orders)})", callback_data="admin_pending")],[InlineKeyboardButton("✔ Confirmed Orders", callback_data="admin_confirmed")],[InlineKeyboardButton("Stock Manager", callback_data="admin_stock")],[InlineKeyboardButton("Messages", callback_data="admin_messages")],[InlineKeyboardButton("Ban/Unban User", callback_data="admin_ban")],[InlineKeyboardButton("Main Menu", callback_data="main_menu")]])
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📊 Dashboard", callback_data="admin_dashboard")],
+        [InlineKeyboardButton(f"Pending Payments ({len(pending_orders)})", callback_data="admin_pending")],
+        [InlineKeyboardButton("✔ Confirmed Orders", callback_data="admin_confirmed")],
+        [InlineKeyboardButton("Stock Manager", callback_data="admin_stock")],
+        [InlineKeyboardButton("💰 Balance Editor", callback_data="admin_balance_editor")],
+        [InlineKeyboardButton("Messages", callback_data="admin_messages")],
+        [InlineKeyboardButton("Ban/Unban User", callback_data="admin_ban")],
+        [InlineKeyboardButton("Main Menu", callback_data="main_menu")],
+    ])
+
+
+def admin_dashboard_text():
+    total_users = len(stored_users)
+    total_deposits = sum(float(u.get("total_deposited", 0) or 0) for u in stored_users.values())
+    total_revenue = sum(float(u.get("total_spent", 0) or 0) for u in stored_users.values())
+    pending_deposits = len([o for o in pending_orders.values() if o.get("type") == "deposit" and o.get("status") == "pending_review"])
+    pending_purchases = len([o for o in pending_orders.values() if o.get("type") == "purchase" and o.get("status") == "pending_review"])
+    low = [p["name"] for p in PRODUCTS.values() if 0 < int(p.get("stock", 0)) <= 3]
+    out = [p["name"] for p in PRODUCTS.values() if int(p.get("stock", 0)) <= 0]
+    txt = (
+        "📊 ADMIN DASHBOARD\n\n"
+        f"Total users: {total_users}\n"
+        f"Total deposits: £{total_deposits:g}\n"
+        f"Total revenue: £{total_revenue:g}\n"
+        f"Pending deposits: {pending_deposits}\n"
+        f"Pending purchases: {pending_purchases}\n\n"
+        "Low stock warnings:\n" + ("\n".join(f"• {x}" for x in low) if low else "None") +
+        "\n\nOut-of-stock alerts:\n" + ("\n".join(f"• {x}" for x in out) if out else "None")
+    )
+    return txt
+
+
+def stock_alert_text():
+    low = [p["name"] for p in PRODUCTS.values() if 0 < int(p.get("stock", 0)) <= 3]
+    out = [p["name"] for p in PRODUCTS.values() if int(p.get("stock", 0)) <= 0]
+    if not low and not out:
+        return None
+    txt = "📦 Stock alert\n\n"
+    if low:
+        txt += "Low stock:\n" + "\n".join(f"• {x}" for x in low) + "\n\n"
+    if out:
+        txt += "Out of stock:\n" + "\n".join(f"• {x}" for x in out)
+    return txt.strip()
 
 
 def coin_keyboard(prefix="pay"):
@@ -743,6 +816,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user["cart"].clear()
         save_account_state(uid)
         complete_purchase(od)
+        try:
+            await context.bot.send_message(ADMIN_ID, f"🛒 Balance purchase completed\n\nUser: {q.from_user.full_name}\nTelegram ID: {uid}\nReference ID: {ref}\nAmount: £{total_gbp}\nProducts:\n{items_text(od['items'])}")
+            alert = stock_alert_text()
+            if alert:
+                await context.bot.send_message(ADMIN_ID, alert)
+        except Exception:
+            pass
         await q.edit_message_text(f"✅ Purchase complete.\nReference ID: {ref}\n\nProducts delivered:\n{delivered_text(od)}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛍 Shop Now", callback_data="show_categories")], [InlineKeyboardButton("📦 My Orders", callback_data="menu_orders")], [InlineKeyboardButton("⬅️ Back", callback_data="menu_cart"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
         return
 
@@ -759,17 +839,27 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ref = make_ref(uid)
         pending_orders[ref] = {"user_id": uid, "username": q.from_user.username, "ref": ref, "total_gbp": total_gbp, "coin": coin, "items": user["cart"].copy(), "created": time.time(), "status": "awaiting_user_paid", "type": "purchase"}
         save_db()
-        msg = (f"ORDER #{ref}\n\n"
-               f"Wallet address:\n{addr}\n\n"
-               f"Reference ID: {ref}\n"
-               f"Purchase total: £{total_gbp}\n"
-               f"Payment method: {coin}\n\n"
-               "IMPORTANT\n\n"
-               "• Only send the selected cryptocurrency to the displayed address.\n\n"
-               "• Sending another cryptocurrency or sending to the wrong address may permanently lose your funds.\n\n"
-               "• Your order will only be processed after payment has been confirmed.\n\n"
+        msg = (f"Purchase Summary\n\n"
+               f"Products:\n{items_text(user['cart'])}\n\n"
+               f"Total:\n£{total_gbp}\n\n"
+               f"Send your payment to:\n\n{coin}\n{addr}\n\n"
+               f"Reference ID:\n#{ref}\n\n"
+               "⚠️ Important\n\n"
+               f"• Only send {coin} to this {coin} address.\n"
+               "• Sending the wrong cryptocurrency or sending to the wrong address may result in permanent loss of funds.\n"
+               "• Your order will be processed after your payment has been confirmed.\n\n"
                "After you’ve sent the payment, press “I’ve Paid”.")
-        await q.edit_message_text(msg, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("I’ve Paid", callback_data=f"paid_{ref}")], [InlineKeyboardButton("⬅️ Back", callback_data="purchase_now"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
+        await q.edit_message_text(msg, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📋 Copy Address", callback_data=f"copyaddr_{ref}"), InlineKeyboardButton("I’ve Paid", callback_data=f"paid_{ref}")], [InlineKeyboardButton("⬅️ Back", callback_data="purchase_now"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
+        return
+
+    if data.startswith("copyaddr_"):
+        ref = data[len("copyaddr_"):]
+        od = pending_orders.get(ref)
+        if not od:
+            await q.answer("Address not found.", show_alert=True)
+            return
+        addr = WALLETS.get(od.get("coin"), "")
+        await q.answer(f"Wallet address:\n{addr}", show_alert=True)
         return
 
     if data.startswith("paid_"):
@@ -794,6 +884,24 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.answer("Access denied", show_alert=True)
             return
         await q.edit_message_text("ADMIN PANEL", reply_markup=admin_panel_keyboard())
+        return
+
+    if data == "admin_dashboard":
+        if uid != ADMIN_ID:
+            await q.answer("Access denied", show_alert=True)
+            return
+        await q.edit_message_text(admin_dashboard_text(), reply_markup=nav_keyboard("admin_open"))
+        return
+
+    if data == "admin_balance_editor":
+        if uid != ADMIN_ID:
+            await q.answer("Access denied", show_alert=True)
+            return
+        user["awaiting_balance_edit"] = True
+        await q.edit_message_text(
+            "Send balance update like this:\n\nUSER_ID AMOUNT\n\nExample:\n123456789 50\n\nThis sets that user’s current balance to the amount.",
+            reply_markup=nav_keyboard("admin_open")
+        )
         return
 
     # Admin pending list
@@ -1187,8 +1295,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ref = make_ref(uid)
         pending_orders[ref] = {"user_id": uid, "username": q.from_user.username, "ref": ref, "total_gbp": amount, "coin": coin, "items": {}, "created": time.time(), "status": "awaiting_user_paid", "type": "deposit"}
         save_db()
-        msg = (f"DEPOSIT #{ref}\n\nWallet address:\n{addr}\n\nReference ID: {ref}\nPurchase total: £{amount}\nPayment method: {coin}\n\nIMPORTANT\n\n• Only send the selected cryptocurrency to the displayed address.\n\n• Sending another cryptocurrency or sending to the wrong address may permanently lose your funds.\n\n• Your balance will only be updated after payment has been confirmed.\n\nAfter you’ve sent the payment, press “I’ve Paid”.")
-        await q.edit_message_text(msg, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("I’ve Paid", callback_data=f"paid_{ref}")], [InlineKeyboardButton("⬅️ Back", callback_data="menu_balance"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
+        msg = (f"Deposit Summary\n\n"
+               f"Amount:\n£{amount}\n\n"
+               f"Send your payment to:\n\n{coin}\n{addr}\n\n"
+               f"Reference ID:\n#{ref}\n\n"
+               "⚠️ Important\n\n"
+               f"• Only send {coin} to this {coin} address.\n"
+               "• Sending the wrong cryptocurrency or sending to the wrong address may result in permanent loss of funds.\n"
+               "• Your balance will be updated after your payment has been confirmed.\n\n"
+               "After you’ve sent the payment, press “I’ve Paid”.")
+        await q.edit_message_text(msg, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📋 Copy Address", callback_data=f"copyaddr_{ref}"), InlineKeyboardButton("I’ve Paid", callback_data=f"paid_{ref}")], [InlineKeyboardButton("⬅️ Back", callback_data="menu_balance"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
         return
 
     if data == "menu_reviews":
@@ -1285,6 +1401,31 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mark_user_active(uid)
 
 
+    # admin balance editor via chat
+    if uid == ADMIN_ID and user.get("awaiting_balance_edit"):
+        parts = text.split(maxsplit=1)
+        if len(parts) != 2 or not parts[0].isdigit():
+            await update.message.reply_text("Send it like: USER_ID AMOUNT")
+            return
+        target = int(parts[0])
+        try:
+            amount = float(parts[1].replace("£", "").strip())
+        except Exception:
+            await update.message.reply_text("Amount must be a number.")
+            return
+        buyer = ensure_stored_user(target)
+        old_balance = buyer.get("balance", 0)
+        buyer["balance"] = amount
+        buyer["transaction_history"].append({"ref": "ADMIN", "type": "admin_balance_edit", "amount": amount - old_balance, "method": "Admin", "time": time.time()})
+        user["awaiting_balance_edit"] = None
+        save_db()
+        await update.message.reply_text(f"Balance updated for {target}: £{old_balance:g} → £{amount:g}", reply_markup=nav_keyboard("admin_open"))
+        try:
+            await context.bot.send_message(target, f"💰 Your balance was updated by admin. Current balance: £{amount:g}")
+        except Exception:
+            pass
+        return
+
     # admin stock change via chat
     if uid == ADMIN_ID and user.get("awaiting_stock_change"):
         pid = user.get("awaiting_stock_change")
@@ -1360,6 +1501,10 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user["awaiting_review"] = False
         reviews.append({"user_id": uid, "name": update.effective_user.first_name or "User", "text": text[:500], "time": time.time()})
         save_db()
+        try:
+            await context.bot.send_message(ADMIN_ID, f"⭐ New review from {update.effective_user.first_name or uid}:\n\n{text[:500]}")
+        except Exception:
+            pass
         await update.message.reply_text("✅ Review saved.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("View Reviews", callback_data="menu_reviews")],[InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
         return
 
@@ -1397,6 +1542,37 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(main_menu_text(), reply_markup=main_menu_keyboard())
 
 
+async def reply_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command: /reply <telegram_id> <message>
+    Sends a private bot message back to a user who contacted support.
+    """
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("Access denied.")
+        return
+    args = context.args or []
+    if len(args) < 2:
+        await update.message.reply_text("Usage: /reply USER_ID your message")
+        return
+    try:
+        target = int(args[0])
+    except Exception:
+        await update.message.reply_text("Invalid user id.")
+        return
+    reply_text = " ".join(args[1:]).strip()
+    if not reply_text:
+        await update.message.reply_text("Reply cannot be empty.")
+        return
+    try:
+        admin_messages.setdefault(str(target), {}).update({"replied": True, "reply": reply_text, "time": admin_messages.get(str(target), {}).get("time", time.time())})
+        ensure_stored_user(target)
+        save_db()
+        await context.bot.send_message(target, f"💬 Reply from store:\n\n{reply_text}")
+    except Exception as e:
+        await update.message.reply_text(f"Failed to send message: {e}")
+        return
+    await update.message.reply_text("Reply sent.")
+
+
 # START and ADMIN PANEL commands
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await check_ban(update, context):
@@ -1425,7 +1601,7 @@ def main():
     # command handlers
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CommandHandler("admin", admin_panel_cmd))
-    # app.add_handler(CommandHandler("reply", reply_command))
+    app.add_handler(CommandHandler("reply", reply_command))
     # callback + message handlers
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
