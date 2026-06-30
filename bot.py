@@ -362,13 +362,13 @@ async def check_ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main_menu_text():
     return (
-        "🎉WELCOME TO PABLOCC STORE🎉\n\n"
-        "Last Seen: a few hours ago\n"
-        "Currency: GBP\n\n"
-        "Pm @blackphonez For Any Spoofing/Spamming/Coding Enquiries & Bulk Deals\n\n"
-        "Join For Updates: https://t.me/+Gz44fjZeiudmYTJk\n\n"
-        "Dedicated 24hr Support Team🕒\n\n"
-        "⬇️Select an option below:"
+     "🎉Welcome To PabloCC Store🎉\n\n"
+     "Last Seen: a few hours ago\n"
+     "Currency: GBP\n\n"
+     "Pm @blackphonez For Any Spoofing/Spamming/Coding Enquiries & Bulk Deals\n\n"
+     "Join For Updates: https://t.me/+Gz44fjZeiudmYTJk \n\n"
+     "Dedicated 24hr Support Team🕒\n\n"
+     "⬇️Select an option below:"
     )
 
 
