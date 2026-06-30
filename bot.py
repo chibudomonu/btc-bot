@@ -35,20 +35,34 @@ WALLETS = {
 }
 
 # Legal digital products only. Product IDs are kept the same so the stock editor and old database shape keep working.
-CATEGORIES = ["Design Packs", "Templates", "Software Help", "Digital Guides"]
+CATEGORIES = ["Barclays", "Lloyds", "Hsbc", "Halifax", "Nationwide", "Santander", "Bank of scotland", "Amex"]
 
 PRODUCTS = {
-    "handheld": {"name": "Starter Logo Pack", "£": 25, "cat": "Design Packs", "stock": 15},
-    "stungun": {"name": "Social Media Banner Pack", "£": 25, "cat": "Design Packs", "stock": 7},
-    "szombie": {"name": "Business Card Template", "£": 25, "cat": "Templates", "stock": 9},
-    "ozombie": {"name": "Flyer Template Bundle", "£": 25, "cat": "Templates", "stock": 6},
-    "rambo": {"name": "CV Template Pack", "£": 15, "cat": "Templates", "stock": 2},
-    "bstilleto": {"name": "Discord Server Setup Guide", "£": 10, "cat": "Digital Guides", "stock": 1},
-    "nstilleto": {"name": "Telegram Bot Setup Guide", "£": 10, "cat": "Digital Guides", "stock": 1},
-    "tosnopro": {"name": "Python Basics Mini Guide", "£": 25, "cat": "Software Help", "stock": 50},
-    "toswiithpro": {"name": "Website Starter Files", "£": 25, "cat": "Software Help", "stock": 50},
-    "wockhardt": {"name": "Excel Invoice Template", "£": 25, "cat": "Templates", "stock": 50},
-    "tris": {"name": "Notion Planner Template", "£": 25, "cat": "Templates", "stock": 50},
+    "552157": {"name": "552157 - Platinum credit", "£": 25, "cat": "Lloyds", "stock": 16},
+    "465941": {"name": "465941 - Business debit", "£": 25, "cat": "Hsbc", "stock": 11},
+    "465923": {"name": "465923 - Platinum debit", "£": 25, "cat": "Barclays", "stock": 15},
+    "465861": {"name": "465861 - Business debit", "£": 25, "cat": "Barclays", "stock": 9},
+    "492915": {"name": "492915 - Platinum credit", "£": 25, "cat": "Barclays", "stock": 7},
+    "465860": {"name": "465860 - Business debit", "£": 25, "cat": "Barclays", "stock": 6},
+    "465922": {"name": "465922 - Platinum debit", "£": 25, "cat": "Barclays", "stock": 2},
+    "459630": {"name": "459630 - Business debit", "£": 15, "cat": "Barclays", "stock": 1},
+    "465935": {"name": "465935 - Classic debit", "£": 15, "cat": "Nationwide", "stock": 1},
+    "465865": {"name": "465865 - Classic debit", "£": 15, "cat": "Barclays", "stock": 1},
+    "535668": {"name": "535668 - Business debit", "£": 25, "cat": "Santander", "stock": 8},
+    "446291": {"name": "446291 - Classic debit", "£": 25, "cat": "Halifax", "stock": 8},
+    "535666": {"name": "535666 - Standard debit", "£": 25, "cat": "Santander", "stock": 5},
+    "454313": {"name": "454313 - Classic debit", "£": 25, "cat": "Nationwide", "stock": 4},
+    "446278": {"name": "446278 - Classic debit", "£": 25, "cat": "Halifax", "stock": 3},
+    "556314": {"name": "556314 - Classic credit", "£": 25, "cat": "Lloyds", "stock": 2},
+    "540440": {"name": "540440 - Gold credit", "£": 15, "cat": "Lloyds", "stock": 2},
+    "446238": {"name": "446238 - Classic debit", "£": 20, "cat": "Bank of scotland", "stock": 1},
+    "476224": {"name": "476224 - Classic debit", "£": 15, "cat": "Bank of scotland", "stock": 1},
+    "446272": {"name": "446272 - Platinum debit", "£": 15, "cat": "Lloyds", "stock": 1},
+    "475144": {"name": "475144 - Classic debit", "£": 15, "cat": "Nationwide", "stock": 1},
+    "462726": {"name": "462726 - Platinum credit", "£": 25, "cat": "Hsbc", "stock": 1},
+    "376015": {"name": "376015 - Globestar", "£": 25, "cat": "Amex", "stock": 1},
+    "374692": {"name": "374692 - Globestar", "£": 25, "cat": "Amex", "stock": 1},
+    "371784": {"name": "371784 - Globestar", "£": 25, "cat": "Amex", "stock": 1},
 }
 
 # PGP key placeholder — paste your key here later (triple single-quotes to avoid nested triple-quote issues)
@@ -338,7 +352,7 @@ async def check_ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             if update.message:
                 await update.message.reply_text("You are banned from using this bot.")
-            elif update.callback_query:
+ o           elif update.callback_query:
                 await update.callback_query.answer("You are banned from using this bot.", show_alert=True)
         except Exception:
             pass
@@ -348,11 +362,12 @@ async def check_ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main_menu_text():
     return (
-        "🎉WELCOME TO PABLO DIGITAL STORE🎉\n\n"
-        "Legal digital products only\n"
-        "Currency: GBP\n"
-        "Crypto payments are manually reviewed by admin.\n\n"
-        "24/7 Support and fast response times\n\n"
+        "🎉WELCOME TO PABLOCC STORE🎉\n\n"
+        "Last Seen: a few hours ago\n"
+        "Currency: GBP\n\n"
+        "Pm @blackphonez For Any Spoofing/Spamming/Coding Enquiries & Bulk Deals\n\n"
+        "Join For Updates: https://t.me/+Gz44fjZeiudmYTJk\n\n"
+        "Dedicated 24hr Support Team🕒\n\n"
         "⬇️Select an option below:"
     )
 
@@ -1269,7 +1284,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ensure_stored_user(update.effective_user.id)
     if user["secret_phrase"] is None:
         user["awaiting_phrase"] = True
-        await update.message.reply_text("👋Welcome to GALORE BOT! This appears to be your first time here\n\n 🔑Please set a phrase-key (between 4–60 characters) that will be used for authentication when you're inactive for more than 10 minutes:")
+        await update.message.reply_text("👋Welcome to PabloCC Store! This appears to be your first time here\n\n 🔑Please set a phrase-key (between 4–60 characters) that will be used for authentication when you're inactive for more than 10 minutes:")
         return
     now = time.time()
     if user.get("secret_phrase") and (now - user.get("last_active", 0) > 600):
