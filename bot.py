@@ -1425,7 +1425,7 @@ def main():
     # command handlers
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CommandHandler("admin", admin_panel_cmd))
-    app.add_handler(CommandHandler("reply", reply_command))
+    # app.add_handler(CommandHandler("reply", reply_command))
     # callback + message handlers
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
