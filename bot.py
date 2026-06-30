@@ -20,7 +20,7 @@ from telegram.ext import (
 )
 
 # ====================== CONFIG ======================
-TELEGRAM_TOKEN = "8775358499:AAEshY_6WpSXhr948B1dLDnuBMlC5zxmIkk"
+TELEGRAM_TOKEN = "8775358499:AAGgmIyh3qiX2VIHhtb5JkJjtFiXvh51T4A"
 ADMIN_ID = 1942502806  # set your admin telegram id here
 MIN_GBP = 0
 
@@ -353,10 +353,7 @@ async def check_ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if update.message:
                 await update.message.reply_text("You are banned from using this bot.")
             elif update.callback_query:
-                await update.callback_query.answer(
-                    "You are banned from using this bot.",
-                    show_alert=True
-                )
+                await update.callback_query.answer("You are banned from using this bot.", show_alert=True)
         except Exception:
             pass
         return True
@@ -365,19 +362,19 @@ async def check_ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main_menu_text():
     return (
-     "🎉Welcome To PabloCC Store🎉\n\n"
-     "Last Seen: a few hours ago\n"
-     "Currency: GBP\n\n"
-     "Pm @blackphonez For Any Spoofing/Spamming/Coding Enquiries & Bulk Deals\n\n"
-     "Join For Updates: https://t.me/+Gz44fjZeiudmYTJk \n\n"
-     "Dedicated 24hr Support Team🕒\n\n"
-     "⬇️Select an option below:"
+        "🌟Welcome To PabloCC Store🌟\n\n"
+        "Admin Last Seen: Recently\n"
+        "Currency: GBP\n"
+        "📲PM @blackphonez For Any Spoofing/Spamming/Coding Enquiries & Bulk Deals\n\n"
+        "Join For Updates: https://t.me/+Gz44fjZeiudmYTJk \n\n"
+        "Dedicated 24hr Support Team🕒\n\n"
+        "⬇️Start Shopping Below:"
     )
 
 
 def main_menu_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✔️Products", callback_data="show_categories")],
+        [InlineKeyboardButton("💳Fullz", callback_data="show_categories")],
         [InlineKeyboardButton("🛒Cart", callback_data="menu_cart"),
          InlineKeyboardButton("❤️Wishlist", callback_data="menu_wishlist")],
         [InlineKeyboardButton("💰Balance", callback_data="menu_balance"),
