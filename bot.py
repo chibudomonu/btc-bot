@@ -1337,7 +1337,7 @@ def main():
     # callback + message handlers
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
-    print("Bot running...")
+    print("PABLO DEPLOY TEST 1")
     app.run_polling()
 
 
