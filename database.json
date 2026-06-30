@@ -1,3 +1,54 @@
+8775358499:AAEshY_6WpSXhr948B1dLDnuBMlC5zxmIkk
+
+def main_menu_text():
+    return (
+        "🌟Welcome To PabloCC Store🌟\n\n"
+        "Admin Last Seen: Recently\n"
+        "Currency: GBP\n"
+        "📲PM @blackphonez For Any Spoofing/Spamming/Coding Enquiries & Bulk Deals\n\n"
+        "Join For Updates: https://t.me/+Gz44fjZeiudmYTJk \n\n"
+        "Dedicated 24hr Support Team🕒\n\n"
+        "⬇️Start Shopping Below:"
+    )
+
+
+
+
+
+CATEGORIES = ["Barclays", "Lloyds", "Hsbc", "Halifax", "Nationwide", "Santander", "Bank of scotland", "Amex"]
+
+PRODUCTS = {
+    "552157": {"name": "552157 - Platinum credit", "£": 25, "cat": "Lloyds", "stock": 16},
+    "465941": {"name": "465941 - Business debit", "£": 25, "cat": "Hsbc", "stock": 11},
+    "465923": {"name": "465923 - Platinum debit", "£": 25, "cat": "Barclays", "stock": 15},
+    "465861": {"name": "465861 - Business debit", "£": 25, "cat": "Barclays", "stock": 9},
+    "492915": {"name": "492915 - Platinum credit", "£": 25, "cat": "Barclays", "stock": 7},
+    "465860": {"name": "465860 - Business debit", "£": 25, "cat": "Barclays", "stock": 6},
+    "465922": {"name": "465922 - Platinum debit", "£": 25, "cat": "Barclays", "stock": 2},
+    "459630": {"name": "459630 - Business debit", "£": 15, "cat": "Barclays", "stock": 1},
+    "465935": {"name": "465935 - Classic debit", "£": 15, "cat": "Nationwide", "stock": 1},
+    "465865": {"name": "465865 - Classic debit", "£": 15, "cat": "Barclays", "stock": 1},
+    "535668": {"name": "535668 - Business debit", "£": 25, "cat": "Santander", "stock": 8},
+    "446291": {"name": "446291 - Classic debit", "£": 25, "cat": "Halifax", "stock": 8},
+    "535666": {"name": "535666 - Standard debit", "£": 25, "cat": "Santander", "stock": 5},
+    "454313": {"name": "454313 - Classic debit", "£": 25, "cat": "Nationwide", "stock": 4},
+    "446278": {"name": "446278 - Classic debit", "£": 25, "cat": "Halifax", "stock": 3},
+    "556314": {"name": "556314 - Classic credit", "£": 25, "cat": "Lloyds", "stock": 2},
+    "540440": {"name": "540440 - Gold credit", "£": 15, "cat": "Lloyds", "stock": 2},
+    "446238": {"name": "446238 - Classic debit", "£": 20, "cat": "Bank of scotland", "stock": 1},
+    "476224": {"name": "476224 - Classic debit", "£": 15, "cat": "Bank of scotland", "stock": 1},
+    "446272": {"name": "446272 - Platinum debit", "£": 15, "cat": "Lloyds", "stock": 1},
+    "475144": {"name": "475144 - Classic debit", "£": 15, "cat": "Nationwide", "stock": 1},
+    "462726": {"name": "462726 - Platinum credit", "£": 25, "cat": "Hsbc", "stock": 1},
+    "376015": {"name": "376015 - Globestar", "£": 25, "cat": "Amex", "stock": 1},
+    "374692": {"name": "374692 - Globestar", "£": 25, "cat": "Amex", "stock": 1},
+    "371784": {"name": "371784 - Globestar", "£": 25, "cat": "Amex", "stock": 1},
+}
+
+
+
+
+
 {
   "banned_users": [],
   "products_stock": {
@@ -59,6 +110,6 @@
     "376015": [],
     "374692": [],
     "371784": []
-
+   
   }
 }

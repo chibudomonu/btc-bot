@@ -28,10 +28,9 @@ DB_FILE = "database.json"
 
 # ====================== WALLETS / PRODUCTS ======================
 WALLETS = {
-    "BTC": "bc1qegrl4yhpaym0nmkesmy3ncc4a727dupaklz4j0",
-    "ETH": "0xfA66D24f9dA4c1fe4b3A3c6625EBBA788f6f41Ea",
-    "LTC": "LZH7L6tCgNmCEwzbnPsLqrVRtWuKUG1ekd",
-    "USDT TRC20": "TPASTE_YOUR_USDT_TRC20_WALLET_HERE",
+    "BTC": "bc1qjg5vjzarnf9rjgygapn6qn496ku4k06wtatdne",
+    "ETH": "0x24f588F9054C2aD4519DF143C855aA8Ba33AD6F7",
+    "LTC": "ltc1qk7a9639eyguyacq9l88cc8dwpfuyu4jhrdclje",
 }
 
 # Legal digital products only. Product IDs are kept the same so the stock editor and old database shape keep working.
@@ -189,6 +188,7 @@ def get_user(uid: int):
             "awaiting_contact": False,
             "awaiting_admin_reply": None,
             "awaiting_stock_change": None,
+            "awaiting_unique_stock": None,
             "awaiting_review": False,
             "awaiting_deposit_amount": False,
         }
@@ -374,7 +374,7 @@ def main_menu_text():
 
 def main_menu_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("💳Fullz", callback_data="show_categories")],
+        [InlineKeyboardButton("✔️Fullz", callback_data="show_categories")],
         [InlineKeyboardButton("🛒Cart", callback_data="menu_cart"),
          InlineKeyboardButton("❤️Wishlist", callback_data="menu_wishlist")],
         [InlineKeyboardButton("💰Balance", callback_data="menu_balance"),
@@ -969,14 +969,87 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text(text, reply_markup=InlineKeyboardMarkup(kb))
         return
 
+    if data.startswith("admin_stock_set_"):
+        if uid != ADMIN_ID:
+            await q.answer("Forbidden", show_alert=True)
+            return
+        pid = data[len("admin_stock_set_"):]
+        if pid not in PRODUCTS:
+            await q.answer("Unknown product", show_alert=True)
+            return
+        user["awaiting_stock_change"] = pid
+        user["awaiting_unique_stock"] = None
+        p = PRODUCTS[pid]
+        unique_count = len(product_items.get(pid, []))
+        await q.edit_message_text(
+            f"Enter new normal stock amount for {p['name']} (current: {p['stock']}).\n\n"
+            f"Unique saved items for this product: {unique_count}\n"
+            "Note: if you use unique items, stock follows the number of saved unique entries.",
+            reply_markup=nav_keyboard(f"admin_stock_{pid}")
+        )
+        return
+
+    if data.startswith("admin_stock_additem_"):
+        if uid != ADMIN_ID:
+            await q.answer("Forbidden", show_alert=True)
+            return
+        pid = data[len("admin_stock_additem_"):]
+        if pid not in PRODUCTS:
+            await q.answer("Unknown product", show_alert=True)
+            return
+        user["awaiting_unique_stock"] = pid
+        user["awaiting_stock_change"] = None
+        p = PRODUCTS[pid]
+        await q.edit_message_text(
+            f"Send the unique item information for {p['name']}.\n\n"
+            "Each message you send now will add 1 unique stock item.\n"
+            "Type DONE when you are finished.",
+            reply_markup=nav_keyboard(f"admin_stock_{pid}")
+        )
+        return
+
+    if data.startswith("admin_stock_clearitems_"):
+        if uid != ADMIN_ID:
+            await q.answer("Forbidden", show_alert=True)
+            return
+        pid = data[len("admin_stock_clearitems_"):]
+        if pid not in PRODUCTS:
+            await q.answer("Unknown product", show_alert=True)
+            return
+        product_items[pid] = []
+        PRODUCTS[pid]["stock"] = 0
+        save_db()
+        await q.edit_message_text(
+            f"Cleared all unique items for {PRODUCTS[pid]['name']}. Stock is now 0.",
+            reply_markup=nav_keyboard(f"admin_stock_{pid}")
+        )
+        return
+
     if data.startswith("admin_stock_"):
         if uid != ADMIN_ID:
             await q.answer("Forbidden", show_alert=True)
             return
         pid = data[len("admin_stock_"):]
-        user["awaiting_stock_change"] = pid
+        if pid not in PRODUCTS:
+            await q.answer("Unknown product", show_alert=True)
+            return
+        user["awaiting_stock_change"] = None
+        user["awaiting_unique_stock"] = None
         p = PRODUCTS[pid]
-        await q.edit_message_text(f"Enter new stock amount for {p['name']} (current: {p['stock']}):", reply_markup=nav_keyboard("admin_stock"))
+        unique_count = len(product_items.get(pid, []))
+        text = (
+            f"STOCK: {p['name']}\n\n"
+            f"Visible stock: {p['stock']}\n"
+            f"Unique saved items: {unique_count}\n\n"
+            "Use normal stock for generic products. Use unique items when every sold unit needs its own information."
+        )
+        kb = [
+            [InlineKeyboardButton("✏️ Set Normal Stock", callback_data=f"admin_stock_set_{pid}")],
+            [InlineKeyboardButton("➕ Add Unique Item", callback_data=f"admin_stock_additem_{pid}")],
+            [InlineKeyboardButton("🗑 Clear Unique Items", callback_data=f"admin_stock_clearitems_{pid}")],
+            [InlineKeyboardButton("⬅️ Back", callback_data="admin_stock"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")],
+        ]
+        await q.edit_message_text(text, reply_markup=InlineKeyboardMarkup(kb))
         return
 
     if data == "admin_messages":
@@ -1165,6 +1238,33 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     user["last_active"] = now
 
+    # admin unique stock item add via chat
+    if uid == ADMIN_ID and user.get("awaiting_unique_stock"):
+        pid = user.get("awaiting_unique_stock")
+        if pid not in PRODUCTS:
+            user["awaiting_unique_stock"] = None
+            await update.message.reply_text("Product not found. Please open Stock Manager again.")
+            return
+        if text.strip().lower() in {"done", "finish", "finished", "stop"}:
+            user["awaiting_unique_stock"] = None
+            save_db()
+            await update.message.reply_text(
+                f"Finished adding unique items for {PRODUCTS[pid]['name']}. Stock: {PRODUCTS[pid]['stock']}",
+                reply_markup=nav_keyboard(f"admin_stock_{pid}")
+            )
+            return
+        product_items.setdefault(pid, [])
+        product_items[pid].append(text)
+        PRODUCTS[pid]["stock"] = len(product_items[pid])
+        save_db()
+        await update.message.reply_text(
+            f"✅ Added 1 unique item to {PRODUCTS[pid]['name']}.\n"
+            f"Current unique stock: {PRODUCTS[pid]['stock']}\n\n"
+            "Send another item, or type DONE when finished.",
+            reply_markup=nav_keyboard(f"admin_stock_{pid}")
+        )
+        return
+
     # admin stock change via chat
     if uid == ADMIN_ID and user.get("awaiting_stock_change"):
         pid = user.get("awaiting_stock_change")
@@ -1172,9 +1272,11 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Send a number.")
             return
         PRODUCTS[pid]["stock"] = int(text)
+        # Normal stock mode: clear unique items for this product so stock does not get overridden by saved unique entries.
+        product_items[pid] = []
         user["awaiting_stock_change"] = None
         save_db()
-        await update.message.reply_text(f"Stock updated for {PRODUCTS[pid]['name']}.")
+        await update.message.reply_text(f"Stock updated for {PRODUCTS[pid]['name']}.", reply_markup=nav_keyboard(f"admin_stock_{pid}"))
         return
 
     # admin ban/unban via chat (triggered by admin panel)
@@ -1284,7 +1386,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ensure_stored_user(update.effective_user.id)
     if user["secret_phrase"] is None:
         user["awaiting_phrase"] = True
-        await update.message.reply_text("👋Welcome to PabloCC Store! This appears to be your first time here\n\n 🔑Please set a phrase-key (between 4–60 characters) that will be used for authentication when you're inactive for more than 10 minutes:")
+        await update.message.reply_text("👋Welcome to GALORE BOT! This appears to be your first time here\n\n 🔑Please set a phrase-key (between 4–60 characters) that will be used for authentication when you're inactive for more than 10 minutes:")
         return
     now = time.time()
     if user.get("secret_phrase") and (now - user.get("last_active", 0) > 600):
