@@ -352,8 +352,11 @@ async def check_ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             if update.message:
                 await update.message.reply_text("You are banned from using this bot.")
-                elif update.callback_query:
-                await update.callback_query.answer("You are banned from using this bot.", show_alert=True)
+            elif update.callback_query:
+                await update.callback_query.answer(
+                    "You are banned from using this bot.",
+                    show_alert=True
+                )
         except Exception:
             pass
         return True
