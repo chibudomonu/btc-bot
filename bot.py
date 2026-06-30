@@ -28,6 +28,10 @@ DB_FILE = "database.json"
 
 # ====================== WALLETS / PRODUCTS ======================
 WALLETS = {
+    "BTC": "bc1qegrl4yhpaym0nmkesmy3ncc4a727dupaklz4j0",
+    "ETH": "0xfA66D24f9dA4c1fe4b3A3c6625EBBA788f6f41Ea",
+    "LTC": "LZH7L6tCgNmCEwzbnPsLqrVRtWuKUG1ekd",
+    "USDT TRC20": "TPASTE_YOUR_USDT_TRC20_WALLET_HERE",
 }
 
 # Legal digital products only. Product IDs are kept the same so the stock editor and old database shape keep working.
@@ -219,6 +223,33 @@ def ensure_stored_user(uid: int):
     return u
 
 
+def mark_user_active(uid: int, save: bool = False):
+    """Refresh the active session timer. Button presses count as activity."""
+    now = time.time()
+    user = get_user(uid)
+    user["last_active"] = now
+    user["awaiting_phrase"] = False
+    su = ensure_stored_user(uid)
+    su["last_active"] = now
+    if save:
+        su["last_authenticated"] = now
+        save_db()
+    return now
+
+
+def phrase_session_expired(uid: int) -> bool:
+    user = get_user(uid)
+    if not user.get("secret_phrase"):
+        return False
+    su = ensure_stored_user(uid)
+    last = max(
+        float(user.get("last_active", 0) or 0),
+        float(su.get("last_active", 0) or 0),
+        float(su.get("last_authenticated", 0) or 0),
+    )
+    return (time.time() - last) > 600
+
+
 def remember_pending_for_user(uid: int, ref: str):
     buyer = ensure_stored_user(uid)
     if ref not in buyer["pending_orders"]:
@@ -364,7 +395,7 @@ def main_menu_text():
     return (
         "🌟Welcome To PabloCC Store🌟\n\n"
         "Admin Last Seen: Recently\n"
-        "Currency: GBP\n\n"
+        "Currency: GBP\n"
         "📲PM @blackphonez For Any Spoofing/Spamming/Coding Enquiries & Bulk Deals\n\n"
         "Join For Updates: https://t.me/+Gz44fjZeiudmYTJk \n\n"
         "Dedicated 24hr Support Team🕒\n\n"
@@ -521,24 +552,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         pass
 
-    if user.get("awaiting_phrase"):
-        try:
-            await context.bot.send_message(uid, "Please send your secret phrase in chat to continue.")
-        except Exception:
-            pass
-        return
+    # Only ask for phrase after a genuine 10+ minutes of no messages/buttons.
+    if user.get("awaiting_phrase") and not phrase_session_expired(uid):
+        user["awaiting_phrase"] = False
 
-    now = time.time()
-    last = user.get("last_active", 0)
-    if user.get("secret_phrase") and (now - last > 600):
+    if user.get("awaiting_phrase") or phrase_session_expired(uid):
         user["awaiting_phrase"] = True
         try:
-            await context.bot.send_message(uid, "Session expired due to 10 minutes of inactivity. Send your secret phrase to continue:")
+            await context.bot.send_message(uid, "🔐 Please enter your phrase key to continue:")
         except Exception:
             pass
         return
 
-    user["last_active"] = now
+    mark_user_active(uid)
     data = q.data
     # Keep track of the active menu message, but do not delete old messages here.
     # Deleting on every button press made the bot feel slow and caused Telegram delays.
@@ -1218,20 +1244,14 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             user["secret_phrase"] = text
             ensure_stored_user(uid)["secret_phrase"] = text
-            user["awaiting_phrase"] = False
-            user["last_active"] = time.time()
-            ensure_stored_user(uid)["last_authenticated"] = user["last_active"]
-            save_db()
+            mark_user_active(uid, save=True)
             await update.message.reply_text(main_menu_text(), reply_markup=main_menu_keyboard())
             return
         else:
             if text != user["secret_phrase"]:
                 await update.message.reply_text("Incorrect phrase. Try again:")
                 return
-            user["awaiting_phrase"] = False
-            user["last_active"] = time.time()
-            ensure_stored_user(uid)["last_authenticated"] = user["last_active"]
-            save_db()
+            mark_user_active(uid, save=True)
             await update.message.reply_text(main_menu_text(), reply_markup=main_menu_keyboard())
             return
 
@@ -1264,13 +1284,16 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # auto-lock for normal user activity only
-    now = time.time()
-    if user.get("secret_phrase") and (now - user.get("last_active", 0) > 600):
+    # Auto-lock only after a genuine 10+ minutes of no messages/buttons.
+    if user.get("awaiting_phrase") and not phrase_session_expired(uid):
+        user["awaiting_phrase"] = False
+
+    if user.get("awaiting_phrase") or phrase_session_expired(uid):
         user["awaiting_phrase"] = True
-        await update.message.reply_text("Session expired due to inactivity. Send your secret phrase to continue:")
+        await update.message.reply_text("🔐 Please enter your phrase key to continue:")
         return
-    user["last_active"] = now
+
+    mark_user_active(uid)
 
     # admin stock change via chat
     if uid == ADMIN_ID and user.get("awaiting_stock_change"):
@@ -1381,8 +1404,8 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Reply sent to user {mid}.", reply_markup=nav_keyboard("admin_messages"))
         return
 
-    # default fallback
-    await update.message.reply_text("Use /start or the menu buttons.")
+    # default fallback: show the menu instead of adding an extra /start step.
+    await update.message.reply_text(main_menu_text(), reply_markup=main_menu_keyboard())
 
 
 # START and ADMIN PANEL commands
@@ -1393,14 +1416,17 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ensure_stored_user(update.effective_user.id)
     if user["secret_phrase"] is None:
         user["awaiting_phrase"] = True
-        await update.message.reply_text("👋Welcome to PabloCC Store! This appears to be your first time here\n\n 🔑Please set a phrase-key (between 4–60 characters) that will be used for authentication when you're inactive for more than 10 minutes:")
+        await update.message.reply_text("👋Welcome To PabloCC Store! This appears to be your first time here\n\n 🔑Please set a phrase-key (between 4–60 characters) that will be used for authentication when you're inactive for more than 10 minutes:")
         return
-    now = time.time()
-    if user.get("secret_phrase") and (now - user.get("last_active", 0) > 600):
+    if user.get("awaiting_phrase") and not phrase_session_expired(update.effective_user.id):
+        user["awaiting_phrase"] = False
+
+    if phrase_session_expired(update.effective_user.id):
         user["awaiting_phrase"] = True
-        await update.message.reply_text("❌Please enter your 4–60 character phrase key:")
+        await update.message.reply_text("🔐 Please enter your phrase key to continue:")
         return
-    user["last_active"] = time.time()
+
+    mark_user_active(update.effective_user.id)
     await update.message.reply_text(main_menu_text(), reply_markup=main_menu_keyboard())
 
 
@@ -1408,6 +1434,17 @@ async def admin_panel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("Access denied.")
         return
+    uid = update.effective_user.id
+    user = get_user(uid)
+    if user.get("secret_phrase") is None:
+        user["awaiting_phrase"] = True
+        await update.message.reply_text("👋Welcome to GALORE BOT! This appears to be your first time here\n\n🔑Please set a phrase-key (between 4–60 characters) that will be used for authentication when you're inactive for more than 10 minutes:")
+        return
+    if phrase_session_expired(uid):
+        user["awaiting_phrase"] = True
+        await update.message.reply_text("🔐 Please enter your phrase key to continue:")
+        return
+    mark_user_active(uid)
     await update.message.reply_text("ADMIN PANEL", reply_markup=admin_panel_keyboard())
 
 
