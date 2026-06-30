@@ -28,9 +28,6 @@ DB_FILE = "database.json"
 
 # ====================== WALLETS / PRODUCTS ======================
 WALLETS = {
-    "BTC": "bc1qjg5vjzarnf9rjgygapn6qn496ku4k06wtatdne",
-    "ETH": "0x24f588F9054C2aD4519DF143C855aA8Ba33AD6F7",
-    "LTC": "ltc1qk7a9639eyguyacq9l88cc8dwpfuyu4jhrdclje",
 }
 
 # Legal digital products only. Product IDs are kept the same so the stock editor and old database shape keep working.
@@ -165,8 +162,10 @@ def save_db():
         "messages": admin_messages,
         "reviews": reviews,
     }
-    with open(DB_FILE, "w") as f:
-        json.dump(db, f, indent=2)
+    tmp_file = DB_FILE + ".tmp"
+    with open(tmp_file, "w") as f:
+        json.dump(db, f, separators=(",", ":"))
+    os.replace(tmp_file, DB_FILE)
 
 
 # ====================== USER HELPERS ======================
@@ -216,6 +215,7 @@ def ensure_stored_user(uid: int):
     u.setdefault("total_spent", 0)
     u.setdefault("lifetime_orders", 0)
     u.setdefault("secret_phrase", None)
+    u.setdefault("last_authenticated", 0)
     return u
 
 
@@ -364,7 +364,7 @@ def main_menu_text():
     return (
         "🌟Welcome To PabloCC Store🌟\n\n"
         "Admin Last Seen: Recently\n"
-        "Currency: GBP\n"
+        "Currency: GBP\n\n"
         "📲PM @blackphonez For Any Spoofing/Spamming/Coding Enquiries & Bulk Deals\n\n"
         "Join For Updates: https://t.me/+Gz44fjZeiudmYTJk \n\n"
         "Dedicated 24hr Support Team🕒\n\n"
@@ -374,7 +374,7 @@ def main_menu_text():
 
 def main_menu_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✔️Fullz", callback_data="show_categories")],
+        [InlineKeyboardButton("✔️Products", callback_data="show_categories")],
         [InlineKeyboardButton("🛒Cart", callback_data="menu_cart"),
          InlineKeyboardButton("❤️Wishlist", callback_data="menu_wishlist")],
         [InlineKeyboardButton("💰Balance", callback_data="menu_balance"),
@@ -515,8 +515,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await check_ban(update, context):
         return
 
+    # Answer callback buttons immediately so Telegram stops showing the loading spinner.
+    try:
+        await q.answer()
+    except Exception:
+        pass
+
     if user.get("awaiting_phrase"):
-        await q.answer("Please send your secret phrase in chat to continue.", show_alert=True)
+        try:
+            await context.bot.send_message(uid, "Please send your secret phrase in chat to continue.")
+        except Exception:
+            pass
         return
 
     now = time.time()
@@ -526,19 +535,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await context.bot.send_message(uid, "Session expired due to 10 minutes of inactivity. Send your secret phrase to continue:")
         except Exception:
-            await q.answer("Session expired — check chat for phrase prompt.", show_alert=True)
+            pass
         return
 
     user["last_active"] = now
-    await q.answer()
     data = q.data
-    # Keep the chat cleaner: delete the previous bot message when a different one is being used.
-    lm = user.get("last_bot_message")
-    if lm and lm.get("message_id") != q.message.message_id:
-        try:
-            await context.bot.delete_message(chat_id=lm["chat_id"], message_id=lm["message_id"])
-        except Exception:
-            pass
+    # Keep track of the active menu message, but do not delete old messages here.
+    # Deleting on every button press made the bot feel slow and caused Telegram delays.
     user["last_bot_message"] = {"chat_id": q.message.chat_id, "message_id": q.message.message_id}
 
     if data == "main_menu":
@@ -1217,6 +1220,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ensure_stored_user(uid)["secret_phrase"] = text
             user["awaiting_phrase"] = False
             user["last_active"] = time.time()
+            ensure_stored_user(uid)["last_authenticated"] = user["last_active"]
             save_db()
             await update.message.reply_text(main_menu_text(), reply_markup=main_menu_keyboard())
             return
@@ -1226,20 +1230,15 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             user["awaiting_phrase"] = False
             user["last_active"] = time.time()
+            ensure_stored_user(uid)["last_authenticated"] = user["last_active"]
             save_db()
             await update.message.reply_text(main_menu_text(), reply_markup=main_menu_keyboard())
             return
 
-    # auto-lock
-    now = time.time()
-    if user.get("secret_phrase") and (now - user.get("last_active", 0) > 600):
-        user["awaiting_phrase"] = True
-        await update.message.reply_text("Session expired due to inactivity. Send your secret phrase to continue:")
-        return
-    user["last_active"] = now
-
-    # admin unique stock item add via chat
+    # Admin pending text-input flows should not be interrupted by the phrase lock.
+    # This stops the bot asking for the phrase while you are adding unique stock items.
     if uid == ADMIN_ID and user.get("awaiting_unique_stock"):
+        user["last_active"] = time.time()
         pid = user.get("awaiting_unique_stock")
         if pid not in PRODUCTS:
             user["awaiting_unique_stock"] = None
@@ -1264,6 +1263,14 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=nav_keyboard(f"admin_stock_{pid}")
         )
         return
+
+    # auto-lock for normal user activity only
+    now = time.time()
+    if user.get("secret_phrase") and (now - user.get("last_active", 0) > 600):
+        user["awaiting_phrase"] = True
+        await update.message.reply_text("Session expired due to inactivity. Send your secret phrase to continue:")
+        return
+    user["last_active"] = now
 
     # admin stock change via chat
     if uid == ADMIN_ID and user.get("awaiting_stock_change"):
@@ -1386,10 +1393,10 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ensure_stored_user(update.effective_user.id)
     if user["secret_phrase"] is None:
         user["awaiting_phrase"] = True
-        await update.message.reply_text("👋Welcome to PabloCC Store!\n\n 🔑Please set a phrase-key (between 4–60 characters) that will be used for authentication when you're inactive for more than 30 minutes:")
+        await update.message.reply_text("👋Welcome to PabloCC Store! This appears to be your first time here\n\n 🔑Please set a phrase-key (between 4–60 characters) that will be used for authentication when you're inactive for more than 10 minutes:")
         return
     now = time.time()
-    if user.get("secret_phrase") and (now - user.get("last_active", 0) > 1800):
+    if user.get("secret_phrase") and (now - user.get("last_active", 0) > 600):
         user["awaiting_phrase"] = True
         await update.message.reply_text("❌Please enter your 4–60 character phrase key:")
         return
