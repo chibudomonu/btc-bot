@@ -28,10 +28,9 @@ DB_FILE = "database.json"
 
 # ====================== WALLETS / PRODUCTS ======================
 WALLETS = {
-    "BTC": "bc1qegrl4yhpaym0nmkesmy3ncc4a727dupaklz4j0",
-    "ETH": "0xfA66D24f9dA4c1fe4b3A3c6625EBBA788f6f41Ea",
-    "LTC": "LZH7L6tCgNmCEwzbnPsLqrVRtWuKUG1ekd",
-    "USDT TRC20": "TPASTE_YOUR_USDT_TRC20_WALLET_HERE",
+    "BTC": "bc1qjg5vjzarnf9rjgygapn6qn496ku4k06wtatdne",
+    "ETH": "0x24f588F9054C2aD4519DF143C855aA8Ba33AD6F7",
+    "LTC": "ltc1qk7a9639eyguyacq9l88cc8dwpfuyu4jhrdclje",
 }
 
 # Legal digital products only. Product IDs are kept the same so the stock editor and old database shape keep working.
@@ -185,6 +184,7 @@ def get_user(uid: int):
             "awaiting_inpost_full": False,
             "temp_delivery": {},
             "temp_qty": {},
+            "selected_qty": {},
             "awaiting_manual_qty": None,
             "last_active": time.time(),
             "last_bot_message": None,
@@ -515,11 +515,34 @@ def main_menu_keyboard():
 
 
 # UI builders
+def get_selected_qty(user, pid):
+    """Single source of truth for the product quantity picker.
+    Old Telegram buttons never carry a quantity; every +1/-1/Add uses this value.
+    """
+    user.setdefault("selected_qty", {})
+    try:
+        qty = int(user["selected_qty"].get(pid, 1))
+    except Exception:
+        qty = 1
+    max_qty = max(1, int(PRODUCTS.get(pid, {}).get("stock", 1)))
+    qty = max(1, min(qty, max_qty))
+    user["selected_qty"][pid] = qty
+    return qty
+
+
+def set_selected_qty(user, pid, qty):
+    user.setdefault("selected_qty", {})
+    max_qty = max(1, int(PRODUCTS.get(pid, {}).get("stock", 1)))
+    qty = max(1, min(int(qty), max_qty))
+    user["selected_qty"][pid] = qty
+    # Keep temp_qty synced for older parts of the bot that still read it.
+    user["temp_qty"] = {"pid": pid, "qty": qty}
+    return qty
+
+
 def build_item_page_text_and_kb(pid, user):
     p = PRODUCTS[pid]
-    temp = user["temp_qty"]
-    qty = temp.get("qty", 1) if temp.get("pid") == pid else 1
-    qty = max(1, min(qty, p["stock"]))
+    qty = get_selected_qty(user, pid)
     text = f"{p['name']}\nPrice: £{p['£']}\nStock: {p['stock']} left\n\nQuantity selected: {qty}"
     kb = [
         [InlineKeyboardButton(f"Quantity: {qty} | Stock: {p['stock']}", callback_data="none")],
@@ -684,9 +707,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("wishlist_add_"):
         pid = data[13:]
         p = PRODUCTS[pid]
-        temp = user["temp_qty"]
-        qty = temp.get("qty", 1) if temp.get("pid") == pid else 1
-        qty = max(1, min(qty, p["stock"]))
+        qty = get_selected_qty(user, pid)
         user["wishlist"][pid] = qty
         save_account_state(uid)
         kb = [[InlineKeyboardButton("❤️ View Wishlist", callback_data="menu_wishlist")],[InlineKeyboardButton("⬅️ Back", callback_data=f"item_{pid}")],[InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]
@@ -720,21 +741,21 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith("qty_inc_"):
         pid = data[8:]
-        cur = user["temp_qty"].get("qty", 1)
-        if user["temp_qty"].get("pid") != pid:
-            cur = 1
-        new_qty = min(cur + 1, PRODUCTS[pid]["stock"])
-        user["temp_qty"] = {"pid": pid, "qty": new_qty}
+        if pid not in PRODUCTS:
+            await q.answer("Product not found.", show_alert=True)
+            return
+        cur = get_selected_qty(user, pid)
+        set_selected_qty(user, pid, cur + 1)
         await show_item_page(q, pid)
         return
 
     if data.startswith("qty_dec_"):
         pid = data[8:]
-        cur = user["temp_qty"].get("qty", 1)
-        if user["temp_qty"].get("pid") != pid:
-            cur = 1
-        new_qty = max(1, cur - 1)
-        user["temp_qty"] = {"pid": pid, "qty": new_qty}
+        if pid not in PRODUCTS:
+            await q.answer("Product not found.", show_alert=True)
+            return
+        cur = get_selected_qty(user, pid)
+        set_selected_qty(user, pid, cur - 1)
         await show_item_page(q, pid)
         return
 
@@ -756,15 +777,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith("qty_add_"):
         pid = data[8:]
-        qty = user["temp_qty"].get("qty", 1)
-        if user["temp_qty"].get("pid") != pid:
-            qty = 1
+        if pid not in PRODUCTS:
+            await q.answer("Product not found.", show_alert=True)
+            return
+        qty = get_selected_qty(user, pid)
         if qty > PRODUCTS[pid]["stock"]:
             await q.answer("Not enough stock!", show_alert=True)
             return
-        user["cart"][pid] = user["cart"].get(pid, 0) + qty
+        user["cart"][pid] = int(user["cart"].get(pid, 0)) + int(qty)
         save_account_state(uid)
         user["temp_qty"] = {}
+        user.setdefault("selected_qty", {}).pop(pid, None)
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("View Cart", callback_data="menu_cart")],[InlineKeyboardButton("Continue Shopping", callback_data="show_categories")],[InlineKeyboardButton("Main Menu", callback_data="main_menu")]])
         await q.edit_message_text(f"Added {qty} × {PRODUCTS[pid]['name']} to cart!", reply_markup=kb)
         return
@@ -1468,7 +1491,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not (1 <= qty <= max_qty):
             await update.message.reply_text(f"❌ Quantity must be 1–{max_qty}.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data=f"item_{pid}")]]))
             return
-        user["temp_qty"] = {"pid": pid, "qty": qty}
+        set_selected_qty(user, pid, qty)
         lm = user.get("last_bot_message")
         if lm:
             await edit_item_page_by_message(context, lm["chat_id"], lm["message_id"], pid, uid)
