@@ -56,7 +56,7 @@ PRODUCTS = {
     "540440": {"name": "540440 - Gold credit", "£": 15, "cat": "Lloyds", "stock": 2},
     "446238": {"name": "446238 - Classic debit", "£": 20, "cat": "Bank of scotland", "stock": 1},
     "476224": {"name": "476224 - Classic debit", "£": 15, "cat": "Bank of scotland", "stock": 1},
-    "446272": {"name": "446272 - Platinum debit", "£": 15, "cat": "Lloyds", "stock": 1},
+    "446272": {"name": "446272 - Platinum debit", "£": 15, "cat": "Lloyds", "stock": 2},
     "475144": {"name": "475144 - Classic debit", "£": 15, "cat": "Nationwide", "stock": 1},
     "462726": {"name": "462726 - Platinum credit", "£": 25, "cat": "Hsbc", "stock": 1},
     "376015": {"name": "376015 - Globestar", "£": 25, "cat": "Amex", "stock": 1},
